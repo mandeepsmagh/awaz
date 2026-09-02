@@ -65,7 +65,7 @@ Discards the current utterance and returns to idle.
 {"type":"keyterms.set","terms":["Svelte","TypeScript","Kubernetes"]}
 ```
 
-Provider-neutral request to bias recognition toward exact domain vocabulary. The Moonshine provider applies it to streaming decoding.
+Provider-neutral request to bias recognition toward exact domain vocabulary. The Moonshine provider applies it to streaming decoding. Moonshine key terms must not contain commas.
 
 ### `context.set`
 
@@ -116,7 +116,9 @@ Partial text may change. Final text is stable for the utterance.
 Errors remain protocol data:
 
 ```json
-{"type":"error","code":"invalid_state","message":"not listening"}
+{"type":"error","code":"invalid_state","message":"not listening","state":"idle","fatal":false}
 ```
+
+`state` is the authoritative Awaz state after the error. Integrations must synchronize to it. `fatal` means the recognizer cannot continue and the process will exit.
 
 Malformed input is reported as `bad_json` without terminating the process.

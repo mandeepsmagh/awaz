@@ -1,3 +1,4 @@
+use crate::VoiceState;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -58,6 +59,8 @@ pub enum Event {
     Error {
         code: String,
         message: String,
+        state: VoiceState,
+        fatal: bool,
     },
     Shutdown,
 }

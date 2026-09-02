@@ -5,6 +5,8 @@ import type {
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 
+type AwazState = "idle" | "listening" | "finalizing" | "speaking";
+
 type AwazEvent =
   | { type: "ready"; version: string; provider: string }
   | { type: "capabilities"; stt: boolean; tts: boolean }
@@ -12,7 +14,13 @@ type AwazEvent =
   | { type: "listen.cancelled" }
   | { type: "transcript.partial"; text: string }
   | { type: "transcript.final"; text: string }
-  | { type: "error"; code: string; message: string }
+  | {
+      type: "error";
+      code: string;
+      message: string;
+      state: AwazState;
+      fatal: boolean;
+    }
   | { type: "shutdown" };
 
 type UiContext = Pick<ExtensionContext, "ui">;
@@ -126,7 +134,17 @@ export default function awazExtension(pi: ExtensionAPI) {
           setState("idle", sessionCtx);
           break;
         case "error":
-          setState("idle", sessionCtx);
+          if (event.fatal) {
+            setState("offline", sessionCtx);
+          } else if (
+            event.state === "idle" ||
+            event.state === "listening" ||
+            event.state === "finalizing"
+          ) {
+            setState(event.state, sessionCtx);
+          } else {
+            setState("offline", sessionCtx);
+          }
           sessionCtx.ui.notify(`Awaz: ${event.message}`, "error");
           break;
       }

@@ -1,6 +1,6 @@
 use anyhow::{Context, Result, anyhow};
 use awaz_audio::{AudioCapture, CaptureConfig, list_input_devices};
-use awaz_core::{Command, Event, Recognizer, SpeechEvent, VoiceState};
+use awaz_core::{Command, Event, Recognizer, RecognizerError, SpeechEvent, VoiceState};
 use awaz_moonshine::{ModelSize, MoonshineRecognizer, default_model_dir};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use crossbeam_channel::{Receiver, bounded, select, tick};
@@ -245,17 +245,17 @@ fn transcribe(args: TranscribeArgs) -> Result<()> {
     let samples: Vec<f32> = match spec.sample_format {
         hound::SampleFormat::Float => reader.samples::<f32>().collect::<Result<_, _>>()?,
         hound::SampleFormat::Int if spec.bits_per_sample <= 16 => {
-            let max = signed_pcm_max(spec.bits_per_sample)? as f32;
+            let scale = signed_pcm_scale(spec.bits_per_sample)?;
             reader
                 .samples::<i16>()
-                .map(|sample| sample.map(|value| value as f32 / max))
+                .map(|sample| sample.map(|value| value as f32 / scale))
                 .collect::<Result<_, _>>()?
         }
         hound::SampleFormat::Int => {
-            let max = signed_pcm_max(spec.bits_per_sample)? as f32;
+            let scale = signed_pcm_scale(spec.bits_per_sample)?;
             reader
                 .samples::<i32>()
-                .map(|sample| sample.map(|value| value as f32 / max))
+                .map(|sample| sample.map(|value| value as f32 / scale))
                 .collect::<Result<_, _>>()?
         }
     };
@@ -281,13 +281,13 @@ fn transcribe(args: TranscribeArgs) -> Result<()> {
     Ok(())
 }
 
-fn signed_pcm_max(bits_per_sample: u16) -> Result<i64> {
+fn signed_pcm_scale(bits_per_sample: u16) -> Result<f32> {
     if !(2..=32).contains(&bits_per_sample) {
         return Err(anyhow!(
             "unsupported integer WAV bit depth: {bits_per_sample}"
         ));
     }
-    Ok((1_i64 << (bits_per_sample - 1)) - 1)
+    Ok((1_i64 << (bits_per_sample - 1)) as f32)
 }
 
 fn serve(args: ServeArgs) -> Result<()> {
@@ -332,7 +332,7 @@ fn serve(args: ServeArgs) -> Result<()> {
                             break;
                         }
                     }
-                    Err(message) => emit_error("bad_json", &message)?,
+                    Err(message) => emit_error("bad_json", &message, state, false)?,
                 }
             }
             recv(audio_rx) -> message => {
@@ -340,14 +340,14 @@ fn serve(args: ServeArgs) -> Result<()> {
                     break;
                 };
                 if state == VoiceState::Listening {
-                    recognizer.push_audio(&chunk).map_err(anyhow::Error::from)?;
+                    require_recognizer(recognizer.push_audio(&chunk), state)?;
                 } else {
                     retain_preroll(&mut preroll, preroll_capacity, chunk.samples);
                 }
             }
             recv(poll_tick) -> _ => {
                 if state == VoiceState::Listening {
-                    for event in recognizer.poll().map_err(anyhow::Error::from)? {
+                    for event in require_recognizer(recognizer.poll(), state)? {
                         emit_speech(event)?;
                     }
                 }
@@ -405,59 +405,66 @@ fn handle_command(
         })?,
         Command::ListenStart => {
             if *state != VoiceState::Idle {
-                emit_error("invalid_state", "already busy")?;
+                emit_error("invalid_state", "already busy", *state, false)?;
                 return Ok(false);
             }
 
-            recognizer.start().map_err(anyhow::Error::from)?;
+            require_recognizer(recognizer.start(), *state)?;
             state.transition(VoiceState::Listening)?;
             if !preroll.is_empty() {
                 let samples = preroll.drain(..).collect();
-                recognizer
-                    .push_audio(&awaz_core::AudioChunk {
+                require_recognizer(
+                    recognizer.push_audio(&awaz_core::AudioChunk {
                         samples,
                         sample_rate,
-                    })
-                    .map_err(anyhow::Error::from)?;
+                    }),
+                    *state,
+                )?;
             }
             emit(&Event::ListenStarted)?;
         }
         Command::ListenStop => {
             if *state != VoiceState::Listening {
-                emit_error("invalid_state", "not listening")?;
+                emit_error("invalid_state", "not listening", *state, false)?;
                 return Ok(false);
             }
 
             state.transition(VoiceState::Finalizing)?;
-            drain_pending_audio(recognizer, audio_rx)?;
-            for event in recognizer.finish().map_err(anyhow::Error::from)? {
+            drain_pending_audio(recognizer, audio_rx, *state)?;
+            for event in require_recognizer(recognizer.finish(), *state)? {
                 emit_speech(event)?;
             }
             state.transition(VoiceState::Idle)?;
         }
         Command::ListenCancel => {
             if *state == VoiceState::Listening || *state == VoiceState::Finalizing {
-                recognizer.cancel().map_err(anyhow::Error::from)?;
+                require_recognizer(recognizer.cancel(), *state)?;
                 while audio_rx.try_recv().is_ok() {}
                 preroll.clear();
                 *state = VoiceState::Idle;
             }
             emit(&Event::ListenCancelled)?;
         }
-        Command::KeytermsSet { terms } => recognizer
-            .set_keyterms(&terms)
-            .map_err(anyhow::Error::from)?,
+        Command::KeytermsSet { terms } => {
+            if let Err(error) = recognizer.set_keyterms(&terms) {
+                emit_error("recognizer_error", &error.to_string(), *state, false)?;
+            }
+        }
         Command::ContextSet { text } => {
-            recognizer.set_context(&text).map_err(anyhow::Error::from)?
+            if let Err(error) = recognizer.set_context(&text) {
+                emit_error("recognizer_error", &error.to_string(), *state, false)?;
+            }
         }
         Command::SpeakStart
         | Command::SpeakText { .. }
         | Command::SpeakEnd
         | Command::SpeakCancel => {
-            emit(&Event::Error {
-                code: "unsupported".into(),
-                message: "TTS is reserved by the protocol but not implemented in Awaz v1".into(),
-            })?;
+            emit_error(
+                "unsupported",
+                "TTS is reserved by the protocol but not implemented in Awaz v1",
+                *state,
+                false,
+            )?;
         }
         Command::Shutdown => {
             if *state == VoiceState::Listening || *state == VoiceState::Finalizing {
@@ -473,9 +480,10 @@ fn handle_command(
 fn drain_pending_audio(
     recognizer: &mut MoonshineRecognizer,
     audio_rx: &Receiver<awaz_core::AudioChunk>,
+    state: VoiceState,
 ) -> Result<()> {
     while let Ok(chunk) = audio_rx.try_recv() {
-        recognizer.push_audio(&chunk).map_err(anyhow::Error::from)?;
+        require_recognizer(recognizer.push_audio(&chunk), state)?;
     }
     Ok(())
 }
@@ -496,11 +504,26 @@ fn emit(event: &Event) -> Result<()> {
     Ok(())
 }
 
-fn emit_error(code: &str, message: &str) -> Result<()> {
+fn emit_error(code: &str, message: &str, state: VoiceState, fatal: bool) -> Result<()> {
     emit(&Event::Error {
         code: code.into(),
         message: message.into(),
+        state,
+        fatal,
     })
+}
+
+fn require_recognizer<T>(
+    result: std::result::Result<T, RecognizerError>,
+    state: VoiceState,
+) -> Result<T> {
+    match result {
+        Ok(value) => Ok(value),
+        Err(error) => {
+            emit_error("recognizer_error", &error.to_string(), state, true)?;
+            Err(error.into())
+        }
+    }
 }
 
 #[cfg(test)]
@@ -509,9 +532,9 @@ mod tests {
 
     #[test]
     fn signed_pcm_scale_rejects_invalid_bit_depths() {
-        assert!(signed_pcm_max(0).is_err());
-        assert!(signed_pcm_max(1).is_err());
-        assert!(signed_pcm_max(33).is_err());
+        assert!(signed_pcm_scale(0).is_err());
+        assert!(signed_pcm_scale(1).is_err());
+        assert!(signed_pcm_scale(33).is_err());
     }
 
     #[test]
