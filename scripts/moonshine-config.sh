@@ -15,6 +15,7 @@ fi
 
 IFS= read -r pinned_moonshine_version < "$version_file"
 MOONSHINE_VERSION="${MOONSHINE_VERSION:-$pinned_moonshine_version}"
+MOONSHINE_VERSION="${MOONSHINE_VERSION%$'\r'}"
 MOONSHINE_VERSION="${MOONSHINE_VERSION#v}"
 if [[ -z "$MOONSHINE_VERSION" ]]; then
   echo "Moonshine version must not be empty." >&2
@@ -38,6 +39,7 @@ moonshine_model_slug() {
 moonshine_models() {
   local line language model extra count=0
   while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
     line="${line%%#*}"
     read -r language model extra <<< "$line"
     [[ -z "${language:-}" ]] && continue

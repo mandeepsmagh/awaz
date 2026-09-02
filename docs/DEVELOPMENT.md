@@ -12,7 +12,7 @@ The Cargo configuration sets the macOS deployment target to 26.0. The Moonshine 
 
 ## Moonshine updates
 
-Change `moonshine.version` to select a new Moonshine release. The runtime download, model setup, and release packaging scripts read this file. Add published language and model pairs to `moonshine.models`. The first entry is the runtime default. Setup and packaging process all entries, but one Awaz process loads one model. `MOONSHINE_HEADER_VERSION` is a separate C ABI value. Update it only after comparing `moonshine-c-api.h` with the handwritten FFI declarations.
+Change `moonshine.version` to select a new Moonshine release. The runtime download, model setup, and release packaging scripts read this file. Git keeps the version and model files in LF format, and the loader also accepts CRLF input. Add published language and model pairs to `moonshine.models`. The first entry is the runtime default. Setup and packaging process all entries, but one Awaz process loads one model. `MOONSHINE_HEADER_VERSION` is a separate C ABI value. Update it only after comparing `moonshine-c-api.h` with the handwritten FFI declarations.
 
 ## Error protocol
 
