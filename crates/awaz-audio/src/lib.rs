@@ -56,7 +56,7 @@ impl AudioCapture {
             .map_err(|e| AudioError::Backend(e.to_string()))?;
         let sample_rate = supported.sample_rate();
         let channels = supported.channels() as usize;
-        let stream_config: cpal::StreamConfig = supported.clone().into();
+        let stream_config: cpal::StreamConfig = supported.into();
         let (sender, receiver) = bounded(config.queue_capacity.max(4));
         let dropped_chunks = Arc::new(AtomicU64::new(0));
 
