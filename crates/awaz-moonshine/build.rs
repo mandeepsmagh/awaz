@@ -7,8 +7,7 @@ fn main() {
     let candidate = env::var_os("AWAZ_MOONSHINE_LIB_DIR")
         .map(PathBuf::from)
         .or_else(|| {
-            let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("../../vendor/moonshine/lib");
+            let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../vendor/moonshine/lib");
             path.exists().then_some(path)
         });
 

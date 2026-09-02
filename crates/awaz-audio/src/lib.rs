@@ -1,9 +1,9 @@
 use awaz_core::AudioChunk;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use crossbeam_channel::{bounded, Receiver, TrySendError};
+use crossbeam_channel::{Receiver, TrySendError, bounded};
 use std::sync::{
-    atomic::{AtomicU64, Ordering},
     Arc,
+    atomic::{AtomicU64, Ordering},
 };
 use thiserror::Error;
 

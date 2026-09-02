@@ -300,8 +300,7 @@ fn serve(args: ServeArgs) -> Result<()> {
     let audio_rx = capture.receiver();
     let command_rx = command_reader();
     let poll_tick = tick(Duration::from_millis(80));
-    let preroll_capacity =
-        ((capture.sample_rate as u64 * args.preroll_ms as u64) / 1000) as usize;
+    let preroll_capacity = ((capture.sample_rate as u64 * args.preroll_ms as u64) / 1000) as usize;
     let mut preroll = VecDeque::<f32>::with_capacity(preroll_capacity.max(1));
     let mut state = VoiceState::Idle;
 
@@ -448,9 +447,9 @@ fn handle_command(
         Command::KeytermsSet { terms } => recognizer
             .set_keyterms(&terms)
             .map_err(anyhow::Error::from)?,
-        Command::ContextSet { text } => recognizer
-            .set_context(&text)
-            .map_err(anyhow::Error::from)?,
+        Command::ContextSet { text } => {
+            recognizer.set_context(&text).map_err(anyhow::Error::from)?
+        }
         Command::SpeakStart
         | Command::SpeakText { .. }
         | Command::SpeakEnd
@@ -476,9 +475,7 @@ fn drain_pending_audio(
     audio_rx: &Receiver<awaz_core::AudioChunk>,
 ) -> Result<()> {
     while let Ok(chunk) = audio_rx.try_recv() {
-        recognizer
-            .push_audio(&chunk)
-            .map_err(anyhow::Error::from)?;
+        recognizer.push_audio(&chunk).map_err(anyhow::Error::from)?;
     }
     Ok(())
 }

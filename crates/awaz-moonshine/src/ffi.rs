@@ -66,8 +66,15 @@ unsafe extern "C" {
         moonshine_version: i32,
     ) -> i32;
     pub fn moonshine_free_transcriber(transcriber_handle: i32);
-    pub fn moonshine_transcriber_set_keyterms(transcriber_handle: i32, keyterms: *const c_char) -> i32;
-    pub fn moonshine_transcriber_set_context(transcriber_handle: i32, context: *const c_char, max_terms: i32) -> i32;
+    pub fn moonshine_transcriber_set_keyterms(
+        transcriber_handle: i32,
+        keyterms: *const c_char,
+    ) -> i32;
+    pub fn moonshine_transcriber_set_context(
+        transcriber_handle: i32,
+        context: *const c_char,
+        max_terms: i32,
+    ) -> i32;
 
     pub fn moonshine_create_stream(transcriber_handle: i32, flags: u32) -> i32;
     pub fn moonshine_free_stream(transcriber_handle: i32, stream_handle: i32) -> i32;
