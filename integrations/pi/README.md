@@ -11,7 +11,7 @@ pi install ./integrations/pi
 ```
 
 Then start Pi normally. `Alt+R` toggles recording; `/awaz cancel` discards a
-recording. Set `AWAZ_BIN`, `AWAZ_MODEL`, `AWAZ_MODEL_DIR`, or `AWAZ_DEVICE` to
-override defaults.
+recording. Set `AWAZ_BIN`, `AWAZ_LANGUAGE`, `AWAZ_MODEL`, `AWAZ_MODEL_DIR`, or
+`AWAZ_DEVICE` to override defaults.
 
 Pi is only the first Awaz integration; no Pi behavior lives in `awaz-core`.

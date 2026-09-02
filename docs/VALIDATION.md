@@ -4,8 +4,8 @@ Awaz is designed so the repository can be checked at several layers before a phy
 
 ## Performed while preparing this source archive
 
-- compared the handwritten Moonshine FFI surface and struct layout against the pinned Moonshine Voice v0.1.5 C header;
-- checked the v0.1.5 native release target names used by the bootstrap/release scripts;
+- compared the handwritten Moonshine FFI surface and struct layout against the pinned Moonshine Voice C header;
+- checked the pinned native release target names used by the bootstrap/release scripts;
 - checked CPAL 0.18.2 API assumptions used by the audio layer;
 - parsed all TOML, JSON and GitHub Actions YAML files;
 - shell-syntax checked all `scripts/*.sh` files;

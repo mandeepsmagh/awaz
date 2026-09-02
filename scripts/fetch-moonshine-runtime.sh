@@ -2,9 +2,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$ROOT/scripts/moonshine-config.sh"
 DEST="$ROOT/vendor/moonshine"
-MOONSHINE_VERSION="${MOONSHINE_VERSION:-v0.1.5}"
-BASE="https://github.com/moonshine-ai/moonshine/releases/download/$MOONSHINE_VERSION"
+BASE="https://github.com/moonshine-ai/moonshine/releases/download/$MOONSHINE_TAG"
 
 os="$(uname -s)"
 arch="$(uname -m)"
@@ -21,6 +21,7 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 curl -fL "$BASE/$asset" -o "$tmp/runtime.tar.gz"
 tar -xzf "$tmp/runtime.tar.gz" -C "$tmp"
+rm -rf "$DEST/lib" "$DEST/include"
 mkdir -p "$DEST/lib" "$DEST/include"
 
 libfile="$(find "$tmp" -type f \( -name 'libmoonshine.so' -o -name 'libmoonshine.a' -o -name 'moonshine.lib' \) | head -n1 || true)"
@@ -36,6 +37,6 @@ header="$(find "$tmp" -type f -name 'moonshine-c-api.h' | head -n1 || true)"
 # Keep the exact upstream license beside the staged runtime so release archives
 # can satisfy third-party redistribution requirements without vendoring binaries
 # or model weights in the source repository.
-curl -fL "https://raw.githubusercontent.com/moonshine-ai/moonshine/$MOONSHINE_VERSION/LICENSE" -o "$DEST/LICENSE"
+curl -fL "https://raw.githubusercontent.com/moonshine-ai/moonshine/$MOONSHINE_TAG/LICENSE" -o "$DEST/LICENSE"
 
 echo "Moonshine runtime staged in $DEST"

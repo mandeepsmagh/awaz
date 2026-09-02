@@ -2,19 +2,11 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$ROOT/scripts/moonshine-config.sh"
 OUT="${1:-$ROOT/dist/awaz}"
-MODEL_ARCH="${AWAZ_MODEL_ARCH:-4}"
-LANGUAGE="${AWAZ_LANGUAGE:-en}"
-slug="small-streaming"
-case "$MODEL_ARCH" in
-  2) slug="tiny-streaming" ;;
-  4) slug="small-streaming" ;;
-  5) slug="medium-streaming" ;;
-  *) echo "AWAZ_MODEL_ARCH must be 2, 4, or 5" >&2; exit 2 ;;
-esac
 
 rm -rf "$OUT"
-mkdir -p "$OUT/lib" "$OUT/models/moonshine/$LANGUAGE/$slug"
+mkdir -p "$OUT/lib" "$OUT/models/moonshine"
 
 bin="$ROOT/target/release/awaz"
 [[ -f "$bin.exe" ]] && bin="$bin.exe"
@@ -50,14 +42,19 @@ case "$(uname -s)" in
     ;;
   *) cache_root="${XDG_CACHE_HOME:-$HOME/.cache}/awaz" ;;
 esac
-model="$cache_root/models/moonshine/$LANGUAGE/$slug"
-[[ -d "$model" ]] || { echo "Model missing: run scripts/dev-setup-model.sh" >&2; exit 4; }
-cp -aL "$model"/. "$OUT/models/moonshine/$LANGUAGE/$slug/"
+while read -r language model_size; do
+  slug="$(moonshine_model_slug "$model_size")"
+  model="$cache_root/models/moonshine/$language/$slug"
+  bundled_model="$OUT/models/moonshine/$language/$slug"
+  [[ -d "$model" ]] || { echo "Model missing: $language $slug. Run scripts/dev-setup-model.sh." >&2; exit 4; }
+  mkdir -p "$bundled_model"
+  cp -aL "$model"/. "$bundled_model/"
+done < <(moonshine_models)
 
-cp "$ROOT/LICENSE" "$ROOT/THIRD_PARTY.md" "$ROOT/README.md" "$OUT/"
+cp "$ROOT/LICENSE" "$ROOT/THIRD_PARTY.md" "$ROOT/README.md" "$ROOT/moonshine.version" "$ROOT/moonshine.models" "$OUT/"
 if [[ -f "$ROOT/vendor/moonshine/LICENSE" ]]; then
   mkdir -p "$OUT/THIRD_PARTY_LICENSES"
-  cp "$ROOT/vendor/moonshine/LICENSE" "$OUT/THIRD_PARTY_LICENSES/MOONSHINE-v0.1.5-LICENSE"
+  cp "$ROOT/vendor/moonshine/LICENSE" "$OUT/THIRD_PARTY_LICENSES/MOONSHINE-$MOONSHINE_TAG-LICENSE"
 fi
 mkdir -p "$OUT/docs" "$OUT/integrations"
 cp -a "$ROOT/docs"/. "$OUT/docs/"

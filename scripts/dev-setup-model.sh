@@ -1,16 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-MOONSHINE_VERSION="${MOONSHINE_VERSION:-0.1.5}"
-LANGUAGE="${AWAZ_LANGUAGE:-en}"
-MODEL_ARCH="${AWAZ_MODEL_ARCH:-4}" # 4 = Small Streaming
-slug="small-streaming"
-case "$MODEL_ARCH" in
-  2) slug="tiny-streaming" ;;
-  4) slug="small-streaming" ;;
-  5) slug="medium-streaming" ;;
-  *) echo "AWAZ_MODEL_ARCH must be 2, 4, or 5" >&2; exit 2 ;;
-esac
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$ROOT/scripts/moonshine-config.sh"
 
 case "$(uname -s)" in
   Darwin) cache_root="$HOME/Library/Caches/awaz" ;;
@@ -24,16 +16,21 @@ case "$(uname -s)" in
   *) cache_root="${XDG_CACHE_HOME:-$HOME/.cache}/awaz" ;;
 esac
 upstream_cache="$cache_root/moonshine-upstream"
-target="$cache_root/models/moonshine/$LANGUAGE/$slug"
-mkdir -p "$(dirname "$target")" "$upstream_cache"
+mkdir -p "$cache_root/models/moonshine" "$upstream_cache"
 
-echo "Downloading Moonshine $slug model (one-time developer setup)…" >&2
-output="$(MOONSHINE_VOICE_CACHE="$upstream_cache" uvx "moonshine-voice==$MOONSHINE_VERSION" download --stt --language "$LANGUAGE" --model-arch "$MODEL_ARCH" 2>&1 | tee /dev/stderr)"
-model_path="$(printf '%s\n' "$output" | sed -n 's/^Downloaded model path: //p' | tail -n1)"
-if [[ -z "$model_path" || ! -d "$model_path" ]]; then
-  echo "Could not determine downloaded model path. Set AWAZ_MODEL_DIR manually." >&2
-  exit 3
-fi
-rm -rf "$target"
-ln -s "$model_path" "$target"
-echo "Awaz model ready: $target -> $model_path" >&2
+while read -r language model_size; do
+  model_arch="$(moonshine_model_arch "$model_size")"
+  slug="$(moonshine_model_slug "$model_size")"
+  target="$cache_root/models/moonshine/$language/$slug"
+
+  echo "Downloading Moonshine $language $slug model (one-time developer setup)…" >&2
+  output="$(MOONSHINE_VOICE_CACHE="$upstream_cache" uvx "moonshine-voice==$MOONSHINE_VERSION" download --stt --language "$language" --model-arch "$model_arch" 2>&1 | tee /dev/stderr)"
+  model_path="$(printf '%s\n' "$output" | sed -n 's/^Downloaded model path: //p' | tail -n1)"
+  if [[ -z "$model_path" || ! -d "$model_path" ]]; then
+    echo "Could not determine the downloaded $language $slug model path." >&2
+    exit 3
+  fi
+  rm -rf "$target"
+  ln -s "$model_path" "$target"
+  echo "Awaz model ready: $target -> $model_path" >&2
+done < <(moonshine_models)

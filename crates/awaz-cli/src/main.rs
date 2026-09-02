@@ -12,6 +12,8 @@ use std::{
     time::Duration,
 };
 
+const MOONSHINE_MODELS: &str = include_str!("../../../moonshine.models");
+
 #[derive(Parser)]
 #[command(
     name = "awaz",
@@ -56,10 +58,10 @@ impl From<ModelArg> for ModelSize {
 
 #[derive(Args, Debug, Clone)]
 struct CommonArgs {
-    #[arg(long, default_value = "en")]
-    language: String,
-    #[arg(long, value_enum, default_value = "small")]
-    model: ModelArg,
+    #[arg(long, env = "AWAZ_LANGUAGE")]
+    language: Option<String>,
+    #[arg(long, value_enum, env = "AWAZ_MODEL")]
+    model: Option<ModelArg>,
     #[arg(long, env = "AWAZ_MODEL_DIR")]
     model_dir: Option<PathBuf>,
 }
@@ -100,8 +102,56 @@ fn main() -> Result<()> {
     }
 }
 
+fn configured_models() -> Result<Vec<(String, ModelSize)>> {
+    let mut models = Vec::new();
+    for (index, raw_line) in MOONSHINE_MODELS.lines().enumerate() {
+        let line = raw_line.split('#').next().unwrap_or_default().trim();
+        if line.is_empty() {
+            continue;
+        }
+
+        let mut fields = line.split_whitespace();
+        let language = fields.next().unwrap_or_default();
+        let model = fields.next().unwrap_or_default();
+        if language.is_empty() || model.is_empty() || fields.next().is_some() {
+            return Err(anyhow!(
+                "invalid moonshine.models entry on line {}",
+                index + 1
+            ));
+        }
+        let size = model
+            .parse::<ModelSize>()
+            .map_err(|error| anyhow!("moonshine.models line {}: {error}", index + 1))?;
+        models.push((language.to_owned(), size));
+    }
+
+    if models.is_empty() {
+        return Err(anyhow!("moonshine.models has no model entries"));
+    }
+    Ok(models)
+}
+
+fn model_selection(common: &CommonArgs) -> Result<(String, ModelSize)> {
+    let configured = configured_models()?;
+    let default = configured
+        .first()
+        .ok_or_else(|| anyhow!("moonshine.models has no model entries"))?;
+    let language = common.language.clone().unwrap_or_else(|| default.0.clone());
+    let size = common
+        .model
+        .map(ModelSize::from)
+        .or_else(|| {
+            configured
+                .iter()
+                .find(|(configured_language, _)| configured_language == &language)
+                .map(|(_, size)| *size)
+        })
+        .ok_or_else(|| anyhow!("no model configured for {language}; pass --model"))?;
+    Ok((language, size))
+}
+
 fn model_path(common: &CommonArgs) -> Result<(PathBuf, ModelSize)> {
-    let size = ModelSize::from(common.model);
+    let (language, size) = model_selection(common)?;
     if let Some(path) = &common.model_dir {
         return Ok((path.clone(), size));
     }
@@ -110,7 +160,7 @@ fn model_path(common: &CommonArgs) -> Result<(PathBuf, ModelSize)> {
         if let Some(root) = exe.parent() {
             let bundled = root
                 .join("models/moonshine")
-                .join(&common.language)
+                .join(&language)
                 .join(size.slug());
             if bundled.exists() {
                 return Ok((bundled, size));
@@ -118,7 +168,7 @@ fn model_path(common: &CommonArgs) -> Result<(PathBuf, ModelSize)> {
         }
     }
 
-    let path = default_model_dir(&common.language, size)
+    let path = default_model_dir(&language, size)
         .ok_or_else(|| anyhow!("cannot determine model directory; pass --model-dir"))?;
     Ok((path, size))
 }

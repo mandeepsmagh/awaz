@@ -13,15 +13,19 @@ Each release archive contains:
 awaz[.exe]
 lib/                       # Linux native runtime; macOS is statically linked
 *.dll                      # Windows runtime DLLs live beside awaz.exe
-models/moonshine/en/small-streaming/
+models/moonshine/<language>/<model>-streaming/
 integrations/pi/
 docs/
 README.md
 LICENSE
+moonshine.version
+moonshine.models
 THIRD_PARTY.md
-THIRD_PARTY_LICENSES/MOONSHINE-v0.1.5-LICENSE
+THIRD_PARTY_LICENSES/MOONSHINE-v<version>-LICENSE
 ```
 
 Awaz does not support Intel macOS. Windows arm64 remains a future target.
+
+The root `moonshine.version` file selects the runtime, model package, and packaged license version. The `moonshine.models` manifest selects all bundled language and model pairs.
 
 macOS signing/notarization and Windows Authenticode signing are separate distribution-hardening steps and require project-owned signing identities/secrets; the workflow is intentionally usable before those secrets exist.

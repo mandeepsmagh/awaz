@@ -8,6 +8,8 @@ notices.
 - Project: https://github.com/moonshine-ai/moonshine
 - License: MIT for the runtime and English streaming models at the time this
   repository was prepared. Verify upstream licensing when adding other models.
+- Release version: see [`moonshine.version`](moonshine.version).
+- Bundled models: see [`moonshine.models`](moonshine.models).
 - Native API: Moonshine C API (`moonshine-c-api.h`), header version 30000.
 
 Awaz intentionally talks to Moonshine through a narrow provider boundary so a

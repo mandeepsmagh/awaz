@@ -73,7 +73,7 @@ cargo build --release -p awaz-cli
 ./target/release/awaz mic
 ```
 
-`dev-setup.sh` stages the pinned Moonshine native library and downloads the English Small Streaming model once. The model is cached under your user cache directory. Awaz supports macOS 26 or newer on Apple Silicon only.
+`dev-setup.sh` stages the Moonshine version selected in `moonshine.version` and downloads each language and model pair in `moonshine.models`. Models are cached under your user cache directory. Awaz supports macOS 26 or newer on Apple Silicon only.
 
 ## CLI
 
@@ -86,12 +86,22 @@ awaz transcribe recording.wav
 awaz serve
 ```
 
-The default recognizer is English Small Streaming. Override it when benchmarking:
+The first entry in `moonshine.models` is the default recognizer. English Small Streaming is the current default. Add one or more language and model pairs before running setup:
+
+```text
+en small
+en tiny
+es small
+```
+
+Setup downloads every listed model. Each Awaz process loads one model:
 
 ```bash
-awaz mic --model tiny
-awaz mic --model medium
+awaz mic --language en --model tiny
+awaz serve --language es --model small
 ```
+
+Only list models published by the selected Moonshine release. The current Moonshine catalog does not publish Hindi or Punjabi STT models. Add their language tags when Moonshine releases them.
 
 Or provide an explicit model directory:
 
@@ -143,6 +153,7 @@ Environment overrides:
 
 ```text
 AWAZ_BIN
+AWAZ_LANGUAGE
 AWAZ_MODEL
 AWAZ_MODEL_DIR
 AWAZ_DEVICE

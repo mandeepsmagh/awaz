@@ -85,6 +85,9 @@ export default function awazExtension(pi: ExtensionAPI) {
     if (process.env.AWAZ_MODEL_DIR) {
       args.push("--model-dir", process.env.AWAZ_MODEL_DIR);
     }
+    if (process.env.AWAZ_LANGUAGE) {
+      args.push("--language", process.env.AWAZ_LANGUAGE);
+    }
     if (process.env.AWAZ_MODEL) {
       args.push("--model", process.env.AWAZ_MODEL);
     }
