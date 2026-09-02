@@ -14,7 +14,7 @@ jobs:
             runtime: linux-x86_64
           - os: ubuntu-24.04-arm
             runtime: linux-arm64
-          - os: macos-15
+          - os: macos-26
             runtime: macos-arm64
           - os: windows-2025
             runtime: windows-x86_64

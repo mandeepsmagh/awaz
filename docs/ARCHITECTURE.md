@@ -58,7 +58,7 @@ set_context
 
 Provider-specific concepts do not appear in protocol or integrations.
 
-Moonshine is implemented in `awaz-moonshine` through a small handwritten C ABI binding. This avoids making `bindgen`, Clang, or a C++ toolchain part of the user's Rust build path.
+Moonshine is implemented in `awaz-moonshine` through a small handwritten C ABI binding. This avoids `bindgen` and generated bindings. macOS builds link the Clang runtime required by the prebuilt Moonshine library.
 
 ## State machine
 
@@ -103,7 +103,7 @@ The provider is still replaceable: packaged files are an implementation detail o
 ## Cross-platform strategy
 
 - Linux/NixOS: CPAL, preferring PipeWire.
-- macOS: CPAL/CoreAudio.
+- macOS 26 or newer on Apple Silicon: CPAL/CoreAudio.
 - Windows: CPAL/WASAPI.
 
 Platform code should stay in audio/packaging layers. Integrations and provider-neutral contracts must not branch on OS.

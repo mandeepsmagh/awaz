@@ -12,7 +12,7 @@ case "$os/$arch" in
   Linux/x86_64) asset="moonshine-voice-linux-x86_64.tar.gz" ;;
   Linux/aarch64|Linux/arm64) asset="moonshine-voice-linux-arm64.tar.gz" ;;
   Darwin/arm64) asset="moonshine-voice-macos-arm64.tar.gz" ;;
-  Darwin/x86_64) echo "Moonshine v0.1.5 does not publish a generic macOS Intel runtime; build Moonshine from source and set AWAZ_MOONSHINE_LIB_DIR." >&2; exit 2 ;;
+  Darwin/x86_64) echo "Awaz supports macOS 26 or newer on Apple Silicon only." >&2; exit 2 ;;
   MINGW*/x86_64|MSYS*/x86_64|CYGWIN*/x86_64) asset="moonshine-voice-windows-x86_64.tar.gz" ;;
   *) echo "Unsupported platform for the prebuilt Moonshine runtime: $os/$arch" >&2; exit 2 ;;
 esac

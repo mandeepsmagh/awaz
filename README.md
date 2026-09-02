@@ -26,7 +26,7 @@ transcript events
 - Local by default: microphone audio never needs to leave the machine.
 - Fast: native audio and native Moonshine inference; the model stays warm in `awaz serve`.
 - Invisible in daily use: one hotkey, speak, transcript appears.
-- Portable: NixOS/Linux and macOS are first-class; Windows is kept architecturally portable.
+- Portable: NixOS/Linux and macOS 26 or newer on Apple Silicon are first-class; Windows is kept architecturally portable.
 - Replaceable providers: a future recognizer can replace Moonshine without changing integrations.
 - Duplex-ready: v1 is STT only, while the protocol/state machine reserves clean TTS and interruption semantics.
 - Boring reliability: bounded queues, pre-roll, explicit state, no HTTP server, no background system daemon.
@@ -50,7 +50,7 @@ transcript events
 
 ## Quick start from source
 
-Prerequisites for a source build are Rust, native audio development libraries, `curl`, and `uv` for the one-time Moonshine model bootstrap. **Released Awaz archives are intended to bundle the Moonshine runtime and default model so users do not need Python/uv.**
+Prerequisites for a source build are Rust, native audio development libraries, `curl`, and `uv` for the one-time Moonshine model bootstrap. macOS builds also require the Xcode command line tools. **Released Awaz archives are intended to bundle the Moonshine runtime and default model so users do not need Python/uv.**
 
 ### NixOS
 
@@ -62,7 +62,7 @@ cargo build --release -p awaz-cli
 ./target/release/awaz mic
 ```
 
-### Linux / macOS Apple Silicon
+### Linux / macOS 26+ on Apple Silicon
 
 With Rust 1.98 and the platform audio development libraries installed:
 
@@ -73,7 +73,7 @@ cargo build --release -p awaz-cli
 ./target/release/awaz mic
 ```
 
-`dev-setup.sh` stages the pinned Moonshine native library and downloads the English Small Streaming model once. The model is cached under your user cache directory. The pinned Moonshine v0.1.5 release does not publish a generic macOS Intel archive; Intel Macs require a source-built Moonshine library supplied through `AWAZ_MOONSHINE_LIB_DIR`.
+`dev-setup.sh` stages the pinned Moonshine native library and downloads the English Small Streaming model once. The model is cached under your user cache directory. Awaz supports macOS 26 or newer on Apple Silicon only.
 
 ## CLI
 
@@ -168,8 +168,7 @@ Target architecture:
 |---|---|---|---|
 | NixOS / Linux x86_64 | CPAL → PipeWire/ALSA | Moonshine native | first-class |
 | Linux arm64 | CPAL → PipeWire/ALSA | Moonshine native | release target |
-| macOS Apple Silicon | CPAL → CoreAudio | Moonshine native | first-class |
-| macOS Intel | CPAL → CoreAudio | Moonshine native/source build | architecture-supported; no upstream v0.1.5 generic binary |
+| macOS 26+ on Apple Silicon | CPAL → CoreAudio | Moonshine native | first-class |
 | Windows x86_64 | CPAL → WASAPI | Moonshine native | portable / CI target |
 | Windows arm64 | CPAL → WASAPI | provider-dependent | future release target |
 
@@ -201,7 +200,7 @@ Before a release is considered solid:
 - `cargo test --workspace`
 - deterministic WAV fixture → recognizer smoke test
 - `awaz doctor`
-- physical microphone smoke tests on NixOS/Linux and macOS
+- physical microphone smoke tests on NixOS/Linux and macOS 26+ on Apple Silicon
 - packaged archive smoke test
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and [`docs/VALIDATION.md`](docs/VALIDATION.md).

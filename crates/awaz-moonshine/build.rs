@@ -4,6 +4,13 @@ fn main() {
     println!("cargo:rerun-if-env-changed=AWAZ_MOONSHINE_LIB_DIR");
     println!("cargo:rerun-if-changed=../../vendor/moonshine/lib");
 
+    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
+    assert!(
+        target_os != "macos" || target_arch == "aarch64",
+        "Awaz supports macOS 26 or newer on Apple Silicon only."
+    );
+
     let candidate = env::var_os("AWAZ_MOONSHINE_LIB_DIR")
         .map(PathBuf::from)
         .or_else(|| {
@@ -19,7 +26,6 @@ fn main() {
     };
 
     println!("cargo:rustc-link-search=native={}", lib_dir.display());
-    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
 
     if target_os == "windows" {
         // Moonshine's Windows bundle may contain multiple import/static libraries.

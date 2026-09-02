@@ -26,7 +26,7 @@ awaz doctor
 physical microphone capture
 ```
 
-The included GitHub Actions workflows perform the Rust format/lint/test/build matrix after the repository is pushed. Physical microphone smoke tests still need real NixOS/Linux and macOS machines.
+The included GitHub Actions workflows perform the Rust format/lint/test/build matrix after the repository is pushed. Physical microphone smoke tests still need real NixOS/Linux machines and an Apple Silicon Mac with macOS 26 or newer.
 
 ## First hardware acceptance pass
 

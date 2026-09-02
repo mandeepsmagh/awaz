@@ -10,5 +10,5 @@ All notable changes to Awaz are documented here.
 - Added `mic`, `transcribe`, `devices`, `doctor` and long-lived `serve` commands.
 - Added runtime key-term/context biasing and provider-neutral STT contracts.
 - Added Pi integration with Alt+R push-to-talk and editable transcript insertion.
-- Added Nix development shell plus Linux arm64/x86_64, macOS arm64 and Windows x86_64 CI/release workflows.
+- Added Nix development shell plus Linux arm64/x86_64, macOS 26 arm64 and Windows x86_64 CI/release workflows.
 - Reserved TTS protocol/state semantics without implementing synthesis in v1.
