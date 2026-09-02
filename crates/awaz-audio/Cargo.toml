@@ -1,0 +1,17 @@
+[package]
+name = "awaz-audio"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+awaz-core = { path = "../awaz-core" }
+crossbeam-channel.workspace = true
+thiserror.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+cpal = { workspace = true, features = ["pipewire"] }
+
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+cpal.workspace = true

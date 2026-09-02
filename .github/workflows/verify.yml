@@ -1,0 +1,60 @@
+name: verify
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  rust:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            runtime: linux-x86_64
+          - os: ubuntu-24.04-arm
+            runtime: linux-arm64
+          - os: macos-15
+            runtime: macos-arm64
+          - os: windows-2025
+            runtime: windows-x86_64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.98.0
+        with:
+          components: rustfmt, clippy
+      - name: Linux audio dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libasound2-dev libpipewire-0.3-dev
+      - name: Stage Moonshine runtime
+        shell: bash
+        run: ./scripts/fetch-moonshine-runtime.sh
+      - name: Configure Moonshine runtime loader
+        shell: bash
+        run: |
+          case "$RUNNER_OS" in
+            Linux)
+              echo "LD_LIBRARY_PATH=$GITHUB_WORKSPACE/vendor/moonshine/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
+              ;;
+            Windows)
+              echo "$GITHUB_WORKSPACE/vendor/moonshine/lib" >> "$GITHUB_PATH"
+              ;;
+          esac
+      - name: Format
+        run: cargo fmt --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Test
+        run: cargo test --workspace
+      - name: Build release
+        run: cargo build --release -p awaz-cli
+
+  protocol-core:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.98.0
+      - run: sudo apt-get update && sudo apt-get install -y pkg-config libasound2-dev libpipewire-0.3-dev
+      - run: ./scripts/fetch-moonshine-runtime.sh
+      - run: cargo test -p awaz-core

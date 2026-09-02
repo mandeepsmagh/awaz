@@ -1,0 +1,13 @@
+[package]
+name = "awaz-moonshine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+build = "build.rs"
+
+[dependencies]
+awaz-core = { path = "../awaz-core" }
+directories.workspace = true
+
+[build-dependencies]

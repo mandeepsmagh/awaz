@@ -1,0 +1,91 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            name: linux-x86_64
+            archive: tar
+          - os: ubuntu-24.04-arm
+            name: linux-arm64
+            archive: tar
+          - os: macos-15
+            name: macos-arm64
+            archive: tar
+          - os: windows-2025
+            name: windows-x86_64
+            archive: zip
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.98.0
+      - uses: astral-sh/setup-uv@v6
+      - name: Linux audio dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libasound2-dev libpipewire-0.3-dev
+      - name: Stage Moonshine runtime and model
+        shell: bash
+        run: |
+          ./scripts/fetch-moonshine-runtime.sh
+          ./scripts/dev-setup-model.sh
+      - name: Configure Moonshine runtime loader
+        shell: bash
+        run: |
+          case "$RUNNER_OS" in
+            Linux)
+              echo "LD_LIBRARY_PATH=$GITHUB_WORKSPACE/vendor/moonshine/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
+              ;;
+            Windows)
+              echo "$GITHUB_WORKSPACE/vendor/moonshine/lib" >> "$GITHUB_PATH"
+              ;;
+          esac
+      - name: Test
+        run: cargo test --workspace
+      - name: Build
+        run: cargo build --release -p awaz-cli
+      - name: Stage release tree
+        shell: bash
+        run: ./scripts/package-release.sh "$PWD/dist/awaz"
+      - name: Archive Unix
+        if: matrix.archive == 'tar'
+        shell: bash
+        run: tar -C dist -czf "awaz-${{ matrix.name }}.tar.gz" awaz
+      - name: Archive Windows
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: Compress-Archive -Path dist/awaz -DestinationPath "awaz-${{ matrix.name }}.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: awaz-${{ matrix.name }}
+          path: awaz-${{ matrix.name }}.*
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Checksums
+        run: |
+          cd artifacts
+          sha256sum awaz-* > SHA256SUMS
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/awaz-*
+            artifacts/SHA256SUMS
+          generate_release_notes: true
