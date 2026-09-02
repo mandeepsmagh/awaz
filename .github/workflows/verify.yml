@@ -10,17 +10,17 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-24.04
+          - os: ubuntu-latest
             runtime: linux-x86_64
           - os: ubuntu-24.04-arm
             runtime: linux-arm64
-          - os: macos-26
+          - os: macos-latest
             runtime: macos-arm64
-          - os: windows-2025
+          - os: windows-latest
             runtime: windows-x86_64
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@1.98.0
         with:
           components: rustfmt, clippy
@@ -51,9 +51,9 @@ jobs:
         run: cargo build --release -p awaz-cli
 
   protocol-core:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@1.98.0
       - run: sudo apt-get update && sudo apt-get install -y pkg-config libasound2-dev libpipewire-0.3-dev
       - run: ./scripts/fetch-moonshine-runtime.sh

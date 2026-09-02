@@ -22,6 +22,10 @@ Each protocol error includes the authoritative voice state. It also states wheth
 
 Keep unsafe Rust in `awaz-moonshine`. Document the safety contract at each unsafe operation. Do not expose native pointers or handles through its safe API.
 
+## CI
+
+Use current Node 24 action majors and GitHub's latest hosted runner aliases. Keep an explicit runner label when GitHub has no architecture-specific latest alias. Disable setup-uv caching unless the repository adds a Python dependency file that can invalidate the cache.
+
 ## Checks
 
 Run these checks before a commit:
