@@ -2,11 +2,11 @@
 
 ## Status
 
-Moonshine is the working STT provider. Its release version and bundled models are centrally configured. macOS targets version 26 or newer on Apple Silicon. The next phase adds Apple Speech as an optional provider.
+Moonshine is the working STT provider. Its release version and bundled models are centrally configured. Model setup supports Unix and Windows shell behavior. macOS targets version 26 or newer on Apple Silicon. The next phase adds Apple Speech as an optional provider.
 
 ## Next
 
-1. Rerun the full CI matrix and complete the Moonshine microphone and Pi hardware checks.
+1. Confirm the v0.1.0 release workflow, then complete the Moonshine microphone and Pi hardware checks.
 2. Add CLI provider selection: `--provider moonshine|apple`.
 3. Add `awaz-apple-speech` for macOS 26 on Apple Silicon.
 4. Use `SpeechAnalyzer` and `SpeechTranscriber` through a small Swift bridge.

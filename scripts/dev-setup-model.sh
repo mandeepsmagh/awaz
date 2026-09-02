@@ -24,13 +24,19 @@ while read -r language model_size; do
   target="$cache_root/models/moonshine/$language/$slug"
 
   echo "Downloading Moonshine $language $slug model (one-time developer setup)…" >&2
-  output="$(MOONSHINE_VOICE_CACHE="$upstream_cache" uvx "moonshine-voice==$MOONSHINE_VERSION" download --stt --language "$language" --model-arch "$model_arch" 2>&1 | tee /dev/stderr)"
+  if ! output="$(MOONSHINE_VOICE_CACHE="$upstream_cache" uvx "moonshine-voice==$MOONSHINE_VERSION" download --stt --language "$language" --model-arch "$model_arch" 2>&1)"; then
+    printf '%s\n' "$output" >&2
+    exit 3
+  fi
+  printf '%s\n' "$output" >&2
+
   model_path="$(printf '%s\n' "$output" | sed -n 's/^Downloaded model path: //p' | tail -n1)"
   if [[ -z "$model_path" || ! -d "$model_path" ]]; then
     echo "Could not determine the downloaded $language $slug model path." >&2
     exit 3
   fi
   rm -rf "$target"
+  mkdir -p "$(dirname "$target")"
   ln -s "$model_path" "$target"
   echo "Awaz model ready: $target -> $model_path" >&2
 done < <(moonshine_models)
