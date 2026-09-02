@@ -24,7 +24,7 @@ Keep unsafe Rust in `awaz-moonshine`. Document the safety contract at each unsaf
 
 ## CI
 
-Use current Node 24 action majors and GitHub's latest hosted runner aliases. Keep an explicit runner label when GitHub has no architecture-specific latest alias. Disable setup-uv caching unless the repository adds a Python dependency file that can invalidate the cache.
+Use current Node 24 action patch tags and GitHub's latest hosted runner aliases. Keep an explicit runner label when GitHub has no architecture-specific latest alias. Disable setup-uv caching unless the repository adds a Python dependency file that can invalidate the cache.
 
 ## Checks
 

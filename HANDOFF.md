@@ -2,7 +2,7 @@
 
 ## Status
 
-Moonshine is the working STT provider. Its release version and bundled models are centrally configured. Model setup supports Unix and Windows shell behavior. CI uses Node 24 actions and disables unused uv caching. macOS targets version 26 or newer on Apple Silicon. The next phase adds Apple Speech as an optional provider.
+Moonshine is the working STT provider. Its release version and bundled models are centrally configured. Model setup supports Unix and Windows shell behavior. CI pins resolvable Node 24 action patch tags and disables unused uv caching. macOS targets version 26 or newer on Apple Silicon. The next phase adds Apple Speech as an optional provider.
 
 ## Next
 
