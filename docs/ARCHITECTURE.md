@@ -96,7 +96,7 @@ stdout is machine data only. stderr is diagnostics only. The stdio protocol is n
 
 ## Model/runtime packaging
 
-Source development stages a pinned Moonshine runtime and model externally. Release archives bundle the native runtime and default model beside `awaz`.
+Source development stages a pinned Moonshine runtime and configured models externally. Release archives bundle the native runtime and every model in `moonshine.models` beside `awaz`.
 
 The provider is still replaceable: packaged files are an implementation detail of `awaz-moonshine`, not `awaz-core`.
 

@@ -48,9 +48,35 @@ transcript events
 - Nix development shell.
 - GitHub Actions verification and release workflows.
 
+## Quick start from a release
+
+Download the archive for your platform from GitHub Releases. Extract the complete `awaz` directory and keep its contents together.
+
+On Linux or macOS:
+
+```bash
+tar -xzf awaz-<platform>.tar.gz
+export PATH="$PWD/awaz:$PATH"
+awaz doctor
+awaz mic
+pi install "$PWD/awaz/integrations/pi"
+```
+
+Add the extracted directory to your shell's persistent `PATH` after validation.
+
+On Windows, extract `awaz-windows-x86_64.zip`, add the directory containing `awaz.exe` to `PATH`, and run:
+
+```powershell
+awaz doctor
+awaz mic
+pi install .\awaz\integrations\pi
+```
+
+Do not copy only the executable. Awaz loads bundled models and platform libraries from the extracted directory. Release archives do not require Rust, Python, or uv. macOS may request microphone permission on the first run. The current macOS and Windows archives are unsigned, so the operating system can require manual approval.
+
 ## Quick start from source
 
-Prerequisites for a source build are Rust, native audio development libraries, `curl`, and `uv` for the one-time Moonshine model bootstrap. macOS builds also require the Xcode command line tools. **Released Awaz archives are intended to bundle the Moonshine runtime and default model so users do not need Python/uv.**
+Prerequisites for a source build are Rust, native audio development libraries, `curl`, and `uv` for the one-time Moonshine model bootstrap. macOS builds also require the Xcode command line tools. **Released Awaz archives bundle the Moonshine runtime and configured models, so users do not need Python or uv.**
 
 ### NixOS
 
@@ -163,7 +189,7 @@ AWAZ_DEVICE
 
 A source checkout intentionally does **not** commit Moonshine binaries or model weights. `scripts/dev-setup.sh` fetches those for development.
 
-The release workflow stages the pinned Moonshine runtime and default English Small Streaming model, then packages them beside the `awaz` binary. At runtime Awaz searches, in order:
+The release workflow stages the selected Moonshine runtime and every model in `moonshine.models`, then packages them beside the `awaz` binary. At runtime Awaz searches, in order:
 
 1. `--model-dir` / `AWAZ_MODEL_DIR`
 2. a bundled `models/moonshine/<language>/<model>` directory beside the executable

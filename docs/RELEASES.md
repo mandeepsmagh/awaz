@@ -24,6 +24,16 @@ THIRD_PARTY.md
 THIRD_PARTY_LICENSES/MOONSHINE-v<version>-LICENSE
 ```
 
+## Installation
+
+Extract the complete archive and keep its directory tree intact. Add the directory that contains `awaz` or `awaz.exe` to `PATH`. Run `awaz doctor` before the first transcription. Install the bundled Pi adapter from `integrations/pi`.
+
+Do not move only the executable. Awaz resolves bundled models and platform libraries relative to it. The archives do not require a source setup, Rust, Python, or uv.
+
+The macOS and Windows archives are not signed. The operating system can require manual approval. macOS can also request microphone permission on the first run.
+
+## Support notes
+
 Awaz does not support Intel macOS. Windows arm64 remains a future target.
 
 The root `moonshine.version` file selects the runtime, model package, and packaged license version. The `moonshine.models` manifest selects all bundled language and model pairs.
