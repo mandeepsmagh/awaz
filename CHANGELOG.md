@@ -2,6 +2,11 @@
 
 All notable changes to Awaz are documented here.
 
+## 0.1.1 - macOS audio diagnostics
+
+- Fixed a panic when a macOS audio device reports no readable description.
+- Report a clear no-input-device error instead of a raw CoreAudio OSStatus.
+
 ## 0.1.0 - Initial source release
 
 - Added Rust 2024 portable core, explicit voice state and stable NDJSON protocol.
