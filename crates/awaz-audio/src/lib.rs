@@ -171,7 +171,8 @@ fn device_display_name(device: &cpal::Device) -> String {
     device
         .description()
         .map(|description| description.name().to_owned())
-        .unwrap_or_else(|_| device.to_string())
+        .or_else(|_| device.id().map(|id| id.to_string()))
+        .unwrap_or_else(|_| "unknown device".to_owned())
 }
 
 fn downmix<T>(input: &[T], channels: usize) -> Vec<f32>
