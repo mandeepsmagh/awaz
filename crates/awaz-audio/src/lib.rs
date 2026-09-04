@@ -9,7 +9,9 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum AudioError {
-    #[error("no input device available")]
+    #[error(
+        "no input device available; connect a microphone and allow microphone access, then retry"
+    )]
     NoInputDevice,
     #[error("audio backend error: {0}")]
     Backend(String),
@@ -49,6 +51,14 @@ pub struct AudioCapture {
 impl AudioCapture {
     pub fn start(config: CaptureConfig) -> Result<Self, AudioError> {
         let host = preferred_host();
+        if config.device_name.is_none() {
+            let mut devices = host
+                .input_devices()
+                .map_err(|e| AudioError::Backend(e.to_string()))?;
+            if devices.next().is_none() {
+                return Err(AudioError::NoInputDevice);
+            }
+        }
         let device = select_device(&host, config.device_name.as_deref())?;
         let device_name = device_display_name(&device);
         let supported = device
