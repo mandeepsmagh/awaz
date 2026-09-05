@@ -18,7 +18,6 @@
               cmake
               curl
               gnumake
-              uv
             ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
               alsa-lib
               pipewire

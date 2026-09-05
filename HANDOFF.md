@@ -2,7 +2,7 @@
 
 ## Status
 
-Moonshine is the working STT provider. Model weights are no longer bundled: `awaz` downloads the selected model on first use into the user cache (`~/.cache/awaz` on Linux and macOS) using the manifest returned by `moonshine_get_stt_dependencies`, so no Python/uv is needed. English Small Streaming is the default. `awaz mic` gained `--save-wav`, dropped-chunk warnings, and drains queued audio before finalizing. CI pins resolvable Node 24 action patch tags and disables unused uv caching. macOS targets version 26 or newer on Apple Silicon. The next phase adds Apple Speech as an optional provider.
+Moonshine is the working STT provider. Model weights are no longer bundled: `awaz` downloads the selected model on first use into the user cache (`~/.cache/awaz` on Linux and macOS) using the manifest returned by `moonshine_get_stt_dependencies`, so no Python/uv is needed. English Small Streaming is the default. `awaz mic` gained `--save-wav`, dropped-chunk warnings, and drains queued audio before finalizing. CI pins resolvable Node 24 action patch tags. macOS targets version 26 or newer on Apple Silicon. The next phase adds Apple Speech as an optional provider.
 
 ## Next
 
