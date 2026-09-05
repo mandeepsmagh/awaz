@@ -2,11 +2,11 @@
 
 ## Status
 
-Moonshine is the working STT provider. Model weights are no longer bundled: `awaz` downloads the selected model on first use into the user cache (`~/.cache/awaz` on Linux and macOS) using the manifest returned by `moonshine_get_stt_dependencies`, so no Python/uv is needed. English Small Streaming is the default. `awaz mic` gained `--save-wav`, dropped-chunk warnings, and drains queued audio before finalizing. CI pins resolvable Node 24 action patch tags. macOS targets version 26 or newer on Apple Silicon. The next phase adds Apple Speech as an optional provider.
+Moonshine is the working STT provider. Models download on first use into `~/.cache/awaz` (default `en small`); releases ship no model weights. The capture queue holds 1024 chunks so slow decoders do not drop audio. The Pi integration starts lazily on the first `Alt+R` and supports `/awaz unload`. Current release 0.2.2. The next phase adds Apple Speech as an optional provider.
 
 ## Next
 
-1. Confirm the v0.1.0 release workflow, then complete the Moonshine microphone and Pi hardware checks.
+1. Re-verify Lenovo dictation after the queue fix, and validate the Pi lazy-start/unload flow.
 2. Add CLI provider selection: `--provider moonshine|apple`.
 3. Add `awaz-apple-speech` for macOS 26 on Apple Silicon.
 4. Use `SpeechAnalyzer` and `SpeechTranscriber` through a small Swift bridge.
@@ -16,6 +16,14 @@ Moonshine is the working STT provider. Model weights are no longer bundled: `awa
 8. Add shared provider behavior checks before changing any platform default.
 9. Compare latency, accuracy, memory, package size, and language support.
 10. Keep Moonshine available on every supported platform. Keep it as the default until measurements support a change.
+
+## Parked: keyterm/context biasing
+
+Dictation misreads programming terms. Moonshine biases decoding toward jargon: `context` (raw text; the library auto-extracts ≤200 unusual terms, replacing the list each call) versus `keyterms` (a short explicit override). The bias is a nudge, not a guarantee, and overloading hurts general accuracy.
+
+The `serve` path already handles `context.set`/`keyterms.set` end to end. Only the Pi extension is missing: send `context.set` (editor text plus the most recently read/edited files, tracked from `tool_call` paths and read via `node:fs`, trimmed to ~4 KB) just before `listen.start`.
+
+Open: how many recent files; whole file vs window; a manual `/awaz context <path>` override; an `AWAZ_KEYTERMS` env override. Not decided.
 
 ## Gotchas
 
