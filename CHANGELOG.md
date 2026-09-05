@@ -2,6 +2,11 @@
 
 All notable changes to Awaz are documented here.
 
+## 0.2.2 - Pi integration starts lazily
+
+- Start Awaz in Pi only on the first `Alt+R` or `/awaz`, not at session start.
+- Add `/awaz unload` to stop the process and free the loaded model.
+
 ## 0.2.1 - Larger audio queue
 
 - Raise the capture queue capacity from 64 to 1024 chunks, so a slow decoder during a cold start or on older CPUs does not drop audio.
