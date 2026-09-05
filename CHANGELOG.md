@@ -2,6 +2,10 @@
 
 All notable changes to Awaz are documented here.
 
+## 0.2.1 - Larger audio queue
+
+- Raise the capture queue capacity from 64 to 1024 chunks, so a slow decoder during a cold start or on older CPUs does not drop audio.
+
 ## 0.2.0 - On-demand model download
 
 - Download the selected Moonshine model on first use into the user cache, using the manifest returned by the Moonshine library. No Python or uv is required.

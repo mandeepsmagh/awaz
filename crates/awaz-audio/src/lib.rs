@@ -35,7 +35,10 @@ impl Default for CaptureConfig {
     fn default() -> Self {
         Self {
             device_name: None,
-            queue_capacity: 64,
+            // Sized to absorb a multi-second cold-start decode stall so the
+            // capture callback never overflows the queue (see the realtime rule
+            // in docs/ARCHITECTURE.md). Memory cost is a few MB.
+            queue_capacity: 1024,
         }
     }
 }
