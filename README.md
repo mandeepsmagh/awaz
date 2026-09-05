@@ -101,8 +101,6 @@ cargo build --release -p awaz-cli
 ./target/release/awaz mic
 ```
 
-`dev-setup.sh` stages only the Moonshine runtime library selected in `moonshine.version` for linking. Model weights are downloaded by `awaz` on first use into your user cache. Awaz supports macOS 26 or newer on Apple Silicon only.
-
 ## CLI
 
 ```bash
@@ -207,10 +205,6 @@ Target architecture:
 | Windows arm64 | CPAL → WASAPI | provider-dependent | future release target |
 
 Real microphone behavior still needs validation on physical hardware for each platform; CI can fully exercise protocol/state logic and file/fixture transcription, but hosted runners do not substitute for device testing.
-
-## Why no Python, ffmpeg, Pipecat, or HTTP daemon?
-
-They are not required on Awaz's hot path. The native process captures audio directly, calls the provider directly, and talks to integrations over stdio. Model downloads use the manifest returned by the Moonshine library and plain `curl`, so no Python or `uv` is involved.
 
 ## Future TTS
 
