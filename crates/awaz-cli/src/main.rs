@@ -58,11 +58,20 @@ impl From<ModelArg> for ModelSize {
 
 #[derive(Args, Debug, Clone)]
 struct CommonArgs {
-    #[arg(long, env = "AWAZ_LANGUAGE")]
+    #[arg(long, env = "AWAZ_LANGUAGE", help = "Language code, for example `en`")]
     language: Option<String>,
-    #[arg(long, value_enum, env = "AWAZ_MODEL")]
+    #[arg(
+        long,
+        value_enum,
+        env = "AWAZ_MODEL",
+        help = "Model size; downloaded on first use"
+    )]
     model: Option<ModelArg>,
-    #[arg(long, env = "AWAZ_MODEL_DIR")]
+    #[arg(
+        long,
+        env = "AWAZ_MODEL_DIR",
+        help = "Use a pre-staged model directory instead of the cache"
+    )]
     model_dir: Option<PathBuf>,
 }
 
@@ -70,9 +79,13 @@ struct CommonArgs {
 struct MicArgs {
     #[command(flatten)]
     common: CommonArgs,
-    #[arg(long)]
+    #[arg(long, help = "Microphone device name; see `awaz devices`")]
     device: Option<String>,
-    #[arg(long, env = "AWAZ_SAVE_WAV")]
+    #[arg(
+        long,
+        env = "AWAZ_SAVE_WAV",
+        help = "Write captured audio to a mono WAV; replay it with `awaz transcribe`"
+    )]
     save_wav: Option<PathBuf>,
 }
 
@@ -80,6 +93,7 @@ struct MicArgs {
 struct TranscribeArgs {
     #[command(flatten)]
     common: CommonArgs,
+    /// Mono WAV file to transcribe.
     path: PathBuf,
 }
 
@@ -87,7 +101,7 @@ struct TranscribeArgs {
 struct ServeArgs {
     #[command(flatten)]
     common: CommonArgs,
-    #[arg(long)]
+    #[arg(long, help = "Microphone device name; see `awaz devices`")]
     device: Option<String>,
     #[arg(long, default_value_t = 450)]
     preroll_ms: u32,
