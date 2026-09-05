@@ -162,11 +162,12 @@ After building/installing `awaz` so it is on `PATH`:
 pi install ./integrations/pi
 ```
 
-Then start Pi normally. Awaz is launched as a Pi-owned companion process and the model remains warm for the session.
+Then start Pi normally. The first `Alt+R` (or `/awaz`) starts Awaz lazily and begins listening once ready.
 
 - `Alt+R`: start/stop push-to-talk
 - `/awaz`: start/stop push-to-talk
 - `/awaz cancel`: discard the current utterance
+- `/awaz unload`: stop Awaz and free the loaded model
 
 The final transcript is pasted into Pi's input editor so it can be corrected before Enter is pressed.
 

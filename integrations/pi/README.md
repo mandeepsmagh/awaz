@@ -10,10 +10,11 @@ Install from a checkout:
 pi install ./integrations/pi
 ```
 
-Then start Pi normally. `Alt+R` toggles recording; `/awaz cancel` discards a
-recording. Set `AWAZ_BIN`, `AWAZ_LANGUAGE`, `AWAZ_MODEL`, `AWAZ_MODEL_DIR`, or
-`AWAZ_DEVICE` to override defaults. `AWAZ_MODEL` accepts `tiny`, `small`, or
-`medium` (default `small`); the selected model downloads into `~/.cache/awaz`
-on first use.
+Then start Pi normally. The first `Alt+R` (or `/awaz`) starts `awaz serve` and
+begins listening once ready. `/awaz cancel` discards a recording; `/awaz unload`
+stops the process and frees the model. Set `AWAZ_BIN`, `AWAZ_LANGUAGE`,
+`AWAZ_MODEL`, `AWAZ_MODEL_DIR`, or `AWAZ_DEVICE` to override defaults.
+`AWAZ_MODEL` accepts `tiny`, `small`, or `medium` (default `small`); the
+selected model downloads into `~/.cache/awaz` on first use.
 
 Pi is only the first Awaz integration; no Pi behavior lives in `awaz-core`.

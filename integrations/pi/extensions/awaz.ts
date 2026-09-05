@@ -37,6 +37,8 @@ export default function awazExtension(pi: ExtensionAPI) {
   let child: ChildProcessWithoutNullStreams | undefined;
   let state: VoiceState = "offline";
   let generation = 0;
+  let activeSession: ExtensionContext | undefined;
+  let pendingListen = false;
 
   const setState = (next: VoiceState, ctx: UiContext) => {
     state = next;
@@ -51,7 +53,7 @@ export default function awazExtension(pi: ExtensionAPI) {
               ? "transcribing…"
               : next === "booting"
                 ? "◌ voice starting"
-                : "voice unavailable";
+                : "🎤 voice off";
     ctx.ui.setStatus("awaz", label);
   };
 
@@ -67,6 +69,7 @@ export default function awazExtension(pi: ExtensionAPI) {
     child = undefined;
     generation += 1;
     state = "offline";
+    pendingListen = false;
 
     if (!proc || proc.killed) return;
     if (proc.stdin.writable) {
@@ -119,6 +122,11 @@ export default function awazExtension(pi: ExtensionAPI) {
         case "ready":
           setState("idle", sessionCtx);
           send({ type: "hello" });
+          if (pendingListen) {
+            pendingListen = false;
+            setState("starting", sessionCtx);
+            send({ type: "listen.start" });
+          }
           break;
         case "listen.started":
           setState("listening", sessionCtx);
@@ -191,12 +199,23 @@ export default function awazExtension(pi: ExtensionAPI) {
     if (state === "booting") {
       ctx.ui.notify("Awaz is still loading the speech model.", "info");
     } else if (state === "offline") {
-      ctx.ui.notify("Awaz is not ready. Run 'awaz doctor' in a shell.", "info");
+      if (!activeSession) {
+        ctx.ui.notify("Awaz is not available in this session.", "info");
+        return;
+      }
+      start(activeSession);
+      pendingListen = true;
     }
   };
 
-  pi.on("session_start", (_event, sessionCtx) => start(sessionCtx));
-  pi.on("session_shutdown", () => stop());
+  pi.on("session_start", (_event, sessionCtx) => {
+    activeSession = sessionCtx;
+    // Awaz starts lazily on the first Alt+R or /awaz, not when the session opens.
+  });
+  pi.on("session_shutdown", () => {
+    stop();
+    activeSession = undefined;
+  });
 
   pi.registerShortcut("alt+r", {
     description: "Awaz push-to-talk",
@@ -204,12 +223,18 @@ export default function awazExtension(pi: ExtensionAPI) {
   });
 
   pi.registerCommand("awaz", {
-    description: "Toggle Awaz push-to-talk (or /awaz cancel)",
+    description: "Toggle Awaz push-to-talk (or /awaz cancel | unload)",
     handler: async (args, commandCtx) => {
-      if (args?.trim() === "cancel") {
+      const arg = args?.trim();
+      if (arg === "cancel") {
         if (state === "listening" || state === "starting" || state === "finalizing") {
           send({ type: "listen.cancel" });
         }
+        return;
+      }
+      if (arg === "unload") {
+        stop();
+        commandCtx.ui.notify("Awaz voice unloaded.", "info");
         return;
       }
       toggle(commandCtx);
