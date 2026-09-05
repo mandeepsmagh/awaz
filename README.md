@@ -172,14 +172,14 @@ Then start Pi normally. Awaz is launched as a Pi-owned companion process and the
 
 The final transcript is pasted into Pi's input editor so it can be corrected before Enter is pressed.
 
-Environment overrides:
+Environment overrides (read once per session, when Awaz starts):
 
 ```text
-AWAZ_BIN
-AWAZ_LANGUAGE
-AWAZ_MODEL
-AWAZ_MODEL_DIR
-AWAZ_DEVICE
+AWAZ_BIN       path to the awaz binary (default: awaz on PATH)
+AWAZ_LANGUAGE  language code (default: en)
+AWAZ_MODEL     tiny | small | medium (default: small)
+AWAZ_MODEL_DIR use a pre-staged model directory instead of the cache
+AWAZ_DEVICE    microphone device name (see awaz devices)
 ```
 
 ## Source versus release packaging
