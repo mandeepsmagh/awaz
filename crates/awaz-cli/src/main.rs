@@ -7,7 +7,7 @@ use crossbeam_channel::{Receiver, bounded, select, tick};
 use std::{
     collections::VecDeque,
     io::{self, BufRead, Write},
-    path::PathBuf,
+    path::{Path, PathBuf},
     thread,
     time::Duration,
 };
@@ -72,6 +72,8 @@ struct MicArgs {
     common: CommonArgs,
     #[arg(long)]
     device: Option<String>,
+    #[arg(long, env = "AWAZ_SAVE_WAV")]
+    save_wav: Option<PathBuf>,
 }
 
 #[derive(Args)]
@@ -150,10 +152,10 @@ fn model_selection(common: &CommonArgs) -> Result<(String, ModelSize)> {
     Ok((language, size))
 }
 
-fn model_path(common: &CommonArgs) -> Result<(PathBuf, ModelSize)> {
+fn model_path(common: &CommonArgs) -> Result<(String, PathBuf, ModelSize)> {
     let (language, size) = model_selection(common)?;
     if let Some(path) = &common.model_dir {
-        return Ok((path.clone(), size));
+        return Ok((language, path.clone(), size));
     }
 
     if let Ok(exe) = std::env::current_exe() {
@@ -163,25 +165,81 @@ fn model_path(common: &CommonArgs) -> Result<(PathBuf, ModelSize)> {
                 .join(&language)
                 .join(size.slug());
             if bundled.exists() {
-                return Ok((bundled, size));
+                return Ok((language, bundled, size));
             }
         }
     }
 
     let path = default_model_dir(&language, size)
         .ok_or_else(|| anyhow!("cannot determine model directory; pass --model-dir"))?;
-    Ok((path, size))
+    Ok((language, path, size))
 }
 
 fn load_recognizer(common: &CommonArgs) -> Result<MoonshineRecognizer> {
-    let (path, size) = model_path(common)?;
+    let (language, path, size) = model_path(common)?;
     if !path.exists() {
-        return Err(anyhow!(
-            "Moonshine model not found at {}. Run scripts/dev-setup-model.sh or pass --model-dir.",
-            path.display()
-        ));
+        if common.model_dir.is_some() {
+            return Err(anyhow!("Moonshine model not found at {}.", path.display()));
+        }
+        let cache = default_model_dir(&language, size)
+            .ok_or_else(|| anyhow!("cannot determine model directory"))?;
+        download_model(&language, size, &cache)?;
+        return MoonshineRecognizer::load(&cache, size).map_err(anyhow::Error::from);
     }
     MoonshineRecognizer::load(&path, size).map_err(anyhow::Error::from)
+}
+
+fn download_model(language: &str, size: ModelSize, dest: &Path) -> Result<()> {
+    eprintln!("downloading Moonshine {language} {} model…", size.slug());
+    let manifest =
+        MoonshineRecognizer::model_manifest(language, size).map_err(anyhow::Error::from)?;
+    let manifest: serde_json::Value = serde_json::from_str(&manifest)?;
+    std::fs::create_dir_all(dest)?;
+
+    let Some(groups) = manifest.get("groups").and_then(serde_json::Value::as_array) else {
+        return Err(anyhow!("model manifest has no groups"));
+    };
+    for group in groups {
+        let Some(files) = group.get("files").and_then(serde_json::Value::as_array) else {
+            continue;
+        };
+        for file in files {
+            let name = file
+                .get("name")
+                .and_then(serde_json::Value::as_str)
+                .context("manifest entry missing name")?;
+            let url = file
+                .get("url")
+                .and_then(serde_json::Value::as_str)
+                .context("manifest entry missing url")?;
+            let target = dest.join(name);
+            let len = target.metadata().map(|meta| meta.len()).unwrap_or(0);
+            let expected = file.get("size").and_then(serde_json::Value::as_u64);
+            let complete = match expected {
+                Some(size) => len == size,
+                None => len > 0,
+            };
+            if complete {
+                continue;
+            }
+
+            // Download to a temporary name and rename only after success, so an
+            // interrupted download never leaves a file that looks complete.
+            let part = dest.join(format!("{name}.part"));
+            let status = std::process::Command::new("curl")
+                .args(["-fsSL", "--retry", "3", "-o"])
+                .arg(&part)
+                .arg(url)
+                .status()
+                .context("failed to run curl")?;
+            if !status.success() {
+                let _ = std::fs::remove_file(&part);
+                return Err(anyhow!("curl failed while downloading {name}"));
+            }
+            std::fs::rename(&part, &target).with_context(|| format!("finalize {name}"))?;
+        }
+    }
+    Ok(())
 }
 
 fn devices() -> Result<()> {
@@ -209,11 +267,8 @@ fn doctor(common: CommonArgs) -> Result<()> {
     eprintln!("  audio capture      ready ({})", capture.device_name);
     drop(capture);
 
-    let (path, size) = model_path(&common)?;
+    let (_, path, size) = model_path(&common)?;
     eprintln!("  model              {} ({})", size.slug(), path.display());
-    if !path.exists() {
-        return Err(anyhow!("model directory is missing"));
-    }
 
     let recognizer = load_recognizer(&common)?;
     drop(recognizer);
@@ -227,6 +282,7 @@ fn doctor(common: CommonArgs) -> Result<()> {
 
 fn mic(args: MicArgs) -> Result<()> {
     let mut recognizer = load_recognizer(&args.common)?;
+    let save_wav = args.save_wav;
     let capture = AudioCapture::start(CaptureConfig {
         device_name: args.device,
         ..Default::default()
@@ -251,12 +307,16 @@ fn mic(args: MicArgs) -> Result<()> {
     recognizer.start().map_err(anyhow::Error::from)?;
     eprintln!("listening…");
     let audio_rx = capture.receiver();
+    let mut saved = save_wav.as_ref().map(|_| Vec::<f32>::new());
 
     loop {
         select! {
             recv(rx) -> _ => break,
             recv(audio_rx) -> message => {
                 if let Ok(chunk) = message {
+                    if let Some(buffer) = saved.as_mut() {
+                        buffer.extend_from_slice(&chunk.samples);
+                    }
                     recognizer.push_audio(&chunk).map_err(anyhow::Error::from)?;
                 }
             }
@@ -272,6 +332,16 @@ fn mic(args: MicArgs) -> Result<()> {
     }
 
     eprintln!();
+
+    // Drain audio still queued from the capture callback before finalizing, so
+    // the tail of the utterance is not lost when Enter stops the loop.
+    while let Ok(chunk) = audio_rx.try_recv() {
+        if let Some(buffer) = saved.as_mut() {
+            buffer.extend_from_slice(&chunk.samples);
+        }
+        recognizer.push_audio(&chunk).map_err(anyhow::Error::from)?;
+    }
+
     let mut final_text = String::new();
     for event in recognizer.finish().map_err(anyhow::Error::from)? {
         if let SpeechEvent::Final(text) = event {
@@ -279,6 +349,34 @@ fn mic(args: MicArgs) -> Result<()> {
         }
     }
     println!("{final_text}");
+
+    if let (Some(path), Some(samples)) = (save_wav.as_ref(), saved.as_ref()) {
+        write_wav(path, samples, capture.sample_rate)?;
+        eprintln!("saved captured audio to {}", path.display());
+    }
+
+    let dropped = capture.dropped_chunks();
+    if dropped > 0 {
+        eprintln!("warning: dropped {dropped} audio chunks while listening");
+    }
+    Ok(())
+}
+
+fn write_wav(path: &Path, samples: &[f32], sample_rate: u32) -> Result<()> {
+    let spec = hound::WavSpec {
+        channels: 1,
+        sample_rate,
+        bits_per_sample: 16,
+        sample_format: hound::SampleFormat::Int,
+    };
+    let mut writer = hound::WavWriter::create(path, spec).context("create save WAV")?;
+    for &sample in samples {
+        let clipped = sample.clamp(-1.0, 1.0);
+        writer
+            .write_sample((clipped * i16::MAX as f32) as i16)
+            .context("write save WAV sample")?;
+    }
+    writer.finalize().context("finalize save WAV")?;
     Ok(())
 }
 
@@ -377,7 +475,7 @@ fn serve(args: ServeArgs) -> Result<()> {
                             &mut recognizer,
                             &mut preroll,
                             &audio_rx,
-                            capture.sample_rate,
+                            &capture,
                         )? {
                             break;
                         }
@@ -446,7 +544,7 @@ fn handle_command(
     recognizer: &mut MoonshineRecognizer,
     preroll: &mut VecDeque<f32>,
     audio_rx: &Receiver<awaz_core::AudioChunk>,
-    sample_rate: u32,
+    capture: &AudioCapture,
 ) -> Result<bool> {
     match command {
         Command::Hello => emit(&Event::Capabilities {
@@ -466,7 +564,7 @@ fn handle_command(
                 require_recognizer(
                     recognizer.push_audio(&awaz_core::AudioChunk {
                         samples,
-                        sample_rate,
+                        sample_rate: capture.sample_rate,
                     }),
                     *state,
                 )?;
@@ -485,6 +583,11 @@ fn handle_command(
                 emit_speech(event)?;
             }
             state.transition(VoiceState::Idle)?;
+
+            let dropped = capture.dropped_chunks();
+            if dropped > 0 {
+                eprintln!("warning: dropped {dropped} audio chunks since start");
+            }
         }
         Command::ListenCancel => {
             if *state == VoiceState::Listening || *state == VoiceState::Finalizing {

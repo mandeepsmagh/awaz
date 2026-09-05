@@ -41,6 +41,8 @@ transcript events
 - Runtime key-term and free-form context biasing.
 - `awaz mic` push-to-talk CLI.
 - `awaz transcribe FILE.wav` for mono WAV input.
+- On-demand model download on first use, cached under `~/.cache/awaz`.
+- `--save-wav` capture dump and dropped-audio-chunk warnings for debugging.
 - `awaz devices` and `awaz doctor`.
 - `awaz serve` stable NDJSON protocol over stdin/stdout.
 - Pi TypeScript integration: `Alt+R` toggles listening and inserts the final transcript into Pi's editor without auto-submitting.
@@ -72,11 +74,11 @@ awaz mic
 pi install .\awaz\integrations\pi
 ```
 
-Do not copy only the executable. Awaz loads bundled models and platform libraries from the extracted directory. Release archives do not require Rust, Python, or uv. macOS may request microphone permission on the first run. The current macOS and Windows archives are unsigned, so the operating system can require manual approval.
+Do not copy only the executable. Awaz ships its platform library in the extracted directory, but speech models are **not** bundled: the first time you select a model, Awaz downloads it into your user cache (`~/.cache/awaz` on Linux and macOS, `%LOCALAPPDATA%\awaz` on Windows) and reuses it from then on. The first run therefore needs a network connection and `curl`. Release archives do not require Rust, Python, or uv. macOS may request microphone permission on the first run. The current macOS and Windows archives are unsigned, so the operating system can require manual approval.
 
 ## Quick start from source
 
-Prerequisites for a source build are Rust, native audio development libraries, `curl`, and `uv` for the one-time Moonshine model bootstrap. macOS builds also require the Xcode command line tools. **Released Awaz archives bundle the Moonshine runtime and configured models, so users do not need Python or uv.**
+Prerequisites for a source build are Rust and native audio development libraries; macOS builds also require the Xcode command line tools. `curl` is needed only when Awaz downloads a speech model on first use. `scripts/dev-setup.sh` stages the Moonshine runtime library for linking; model files are fetched on demand by the binary, not by the build.
 
 ### NixOS
 
@@ -99,7 +101,7 @@ cargo build --release -p awaz-cli
 ./target/release/awaz mic
 ```
 
-`dev-setup.sh` stages the Moonshine version selected in `moonshine.version` and downloads each language and model pair in `moonshine.models`. Models are cached under your user cache directory. Awaz supports macOS 26 or newer on Apple Silicon only.
+`dev-setup.sh` stages only the Moonshine runtime library selected in `moonshine.version` for linking. Model weights are downloaded by `awaz` on first use into your user cache. Awaz supports macOS 26 or newer on Apple Silicon only.
 
 ## CLI
 
@@ -112,29 +114,23 @@ awaz transcribe recording.wav
 awaz serve
 ```
 
-The first entry in `moonshine.models` is the default recognizer. English Medium Streaming is the current default. Add one or more language and model pairs before running setup:
-
-```text
-en medium
-en small
-en tiny
-es small
-```
-
-Setup downloads every listed model. Each Awaz process loads one model:
+The first entry in `moonshine.models` is the default recognizer. English Small Streaming is the current default. Select a model with `--model` (or `--language`); Awaz downloads that model on first use and caches it:
 
 ```bash
-awaz mic --language en --model tiny
+awaz mic --model tiny
+awaz mic --model medium
 awaz serve --language es --model small
 ```
 
-Only list models published by the selected Moonshine release. The current Moonshine catalog does not publish Hindi or Punjabi STT models. Add their language tags when Moonshine releases them.
+Model files live under `~/.cache/awaz/models/moonshine/<language>/<size>-streaming/` (`%LOCALAPPDATA%\awaz\...` on Windows). Only published language and model pairs are available; the current Moonshine catalog does not publish Hindi or Punjabi STT models.
 
-Or provide an explicit model directory:
+For fully offline use, pre-stage a model directory and point at it:
 
 ```bash
 AWAZ_MODEL_DIR=/path/to/model awaz mic
 ```
+
+To dump the audio a `mic` session actually captured, add `--save-wav utter.wav` (or `AWAZ_SAVE_WAV`), then replay it with `awaz transcribe utter.wav`.
 
 ## Machine protocol
 
@@ -188,15 +184,15 @@ AWAZ_DEVICE
 
 ## Source versus release packaging
 
-A source checkout intentionally does **not** commit Moonshine binaries or model weights. `scripts/dev-setup.sh` fetches those for development.
+A source checkout intentionally does **not** commit Moonshine binaries or model weights. `scripts/dev-setup.sh` stages the runtime library for linking; the binary downloads model weights on first use.
 
-The release workflow stages the selected Moonshine runtime and every model in `moonshine.models`, then packages them beside the `awaz` binary. At runtime Awaz searches, in order:
+The release workflow stages the Moonshine runtime library beside the `awaz` binary but ships **no** model weights, keeping the archive small. At runtime Awaz resolves a model directory in this order:
 
 1. `--model-dir` / `AWAZ_MODEL_DIR`
-2. a bundled `models/moonshine/<language>/<model>` directory beside the executable
+2. a `models/moonshine/<language>/<model>` directory beside the executable
 3. the user cache directory
 
-This keeps normal release use self-contained while preserving clean source licensing and provider replacement.
+If none exists, Awaz downloads the selected model into the cache using the manifest returned by the Moonshine library itself, so the file layout stays in sync with the runtime version.
 
 ## Platform status
 
@@ -214,7 +210,7 @@ Real microphone behavior still needs validation on physical hardware for each pl
 
 ## Why no Python, ffmpeg, Pipecat, or HTTP daemon?
 
-They are not required on Awaz's hot path. The native process captures audio directly, calls the provider directly, and talks to integrations over stdio. Python/`uvx` is used only as a convenient source-development model downloader until Awaz has its own provider catalog/downloader.
+They are not required on Awaz's hot path. The native process captures audio directly, calls the provider directly, and talks to integrations over stdio. Model downloads use the manifest returned by the Moonshine library and plain `curl`, so no Python or `uv` is involved.
 
 ## Future TTS
 

@@ -2,7 +2,7 @@
 
 ## Status
 
-Moonshine is the working STT provider. Its release version and bundled models are centrally configured. Model setup supports Unix and Windows shell behavior. CI pins resolvable Node 24 action patch tags and disables unused uv caching. Release documentation explains archive installation and required directory layout. macOS targets version 26 or newer on Apple Silicon. The next phase adds Apple Speech as an optional provider.
+Moonshine is the working STT provider. Model weights are no longer bundled: `awaz` downloads the selected model on first use into the user cache (`~/.cache/awaz` on Linux and macOS) using the manifest returned by `moonshine_get_stt_dependencies`, so no Python/uv is needed. English Small Streaming is the default. `awaz mic` gained `--save-wav`, dropped-chunk warnings, and drains queued audio before finalizing. CI pins resolvable Node 24 action patch tags and disables unused uv caching. macOS targets version 26 or newer on Apple Silicon. The next phase adds Apple Speech as an optional provider.
 
 ## Next
 
@@ -19,6 +19,9 @@ Moonshine is the working STT provider. Its release version and bundled models ar
 
 ## Gotchas
 
+- Model download on first use needs `curl` and a network connection; releases bundle the runtime library but no model weights.
+- The model cache is `~/.cache/awaz` on Linux and macOS (not `~/Library/Caches`); Windows uses `%LOCALAPPDATA%\awaz`.
+- The download manifest comes from the Moonshine library, so the file layout tracks the runtime version; do not hardcode CDN paths.
 - Apple Speech is a second provider, not a Moonshine replacement.
 - The NDJSON protocol and Pi integration must remain provider-neutral.
 - Apple framework APIs are asynchronous. Do not block audio capture while waiting for them.

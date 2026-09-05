@@ -30,17 +30,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: dtolnay/rust-toolchain@1.98.0
-      - uses: astral-sh/setup-uv@v10.0.1
-        with:
-          enable-cache: false
       - name: Linux audio dependencies
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y pkg-config libasound2-dev libpipewire-0.3-dev
-      - name: Stage Moonshine runtime and model
+      - name: Stage Moonshine runtime
         shell: bash
-        run: |
-          ./scripts/fetch-moonshine-runtime.sh
-          ./scripts/dev-setup-model.sh
+        run: ./scripts/fetch-moonshine-runtime.sh
       - name: Configure Moonshine runtime loader
         shell: bash
         run: |

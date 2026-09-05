@@ -6,7 +6,7 @@ source "$ROOT/scripts/moonshine-config.sh"
 OUT="${1:-$ROOT/dist/awaz}"
 
 rm -rf "$OUT"
-mkdir -p "$OUT/lib" "$OUT/models/moonshine"
+mkdir -p "$OUT/lib"
 
 bin="$ROOT/target/release/awaz"
 [[ -f "$bin.exe" ]] && bin="$bin.exe"
@@ -31,25 +31,8 @@ if [[ -d "$ROOT/vendor/moonshine/lib" ]]; then
 fi
 rmdir "$OUT/lib" 2>/dev/null || true
 
-case "$(uname -s)" in
-  Darwin) cache_root="$HOME/Library/Caches/awaz" ;;
-  MINGW*|MSYS*|CYGWIN*)
-    if [[ -n "${LOCALAPPDATA:-}" ]] && command -v cygpath >/dev/null 2>&1; then
-      cache_root="$(cygpath -u "$LOCALAPPDATA")/awaz"
-    else
-      cache_root="${XDG_CACHE_HOME:-$HOME/.cache}/awaz"
-    fi
-    ;;
-  *) cache_root="${XDG_CACHE_HOME:-$HOME/.cache}/awaz" ;;
-esac
-while read -r language model_size; do
-  slug="$(moonshine_model_slug "$model_size")"
-  model="$cache_root/models/moonshine/$language/$slug"
-  bundled_model="$OUT/models/moonshine/$language/$slug"
-  [[ -d "$model" ]] || { echo "Model missing: $language $slug. Run scripts/dev-setup-model.sh." >&2; exit 4; }
-  mkdir -p "$bundled_model"
-  cp -aL "$model"/. "$bundled_model/"
-done < <(moonshine_models)
+# Models are not bundled: `awaz` downloads the selected model on first use
+# into the user cache (~/.cache/awaz or %LOCALAPPDATA%\awaz).
 
 cp "$ROOT/LICENSE" "$ROOT/THIRD_PARTY.md" "$ROOT/README.md" "$ROOT/moonshine.version" "$ROOT/moonshine.models" "$OUT/"
 if [[ -f "$ROOT/vendor/moonshine/LICENSE" ]]; then

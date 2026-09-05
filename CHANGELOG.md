@@ -2,6 +2,17 @@
 
 All notable changes to Awaz are documented here.
 
+## 0.2.0 - On-demand model download
+
+- Download the selected Moonshine model on first use into the user cache, using the manifest returned by the Moonshine library. No Python or uv is required.
+- Stop bundling model weights in release archives. Archives ship the binary and runtime library only.
+- Use English Small Streaming as the default model.
+- Add `awaz mic --save-wav` to dump captured audio for replay and debugging.
+- Warn on stderr when audio chunks are dropped in `mic` and `serve`.
+- Drain queued audio before finalizing a `mic` utterance.
+- Download to a `.part` file and verify size before rename, so an interrupted download cannot look complete.
+- Unify the model cache under `~/.cache/awaz` on Linux and macOS.
+
 ## 0.1.2 - English Medium default
 
 - Use English Medium Streaming as the default Moonshine model.

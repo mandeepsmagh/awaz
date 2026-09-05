@@ -13,7 +13,6 @@ Each release archive contains:
 awaz[.exe]
 lib/                       # Linux native runtime; macOS is statically linked
 *.dll                      # Windows runtime DLLs live beside awaz.exe
-models/moonshine/<language>/<model>-streaming/
 integrations/pi/
 docs/
 README.md
@@ -28,7 +27,7 @@ THIRD_PARTY_LICENSES/MOONSHINE-v<version>-LICENSE
 
 Extract the complete archive and keep its directory tree intact. Add the directory that contains `awaz` or `awaz.exe` to `PATH`. Run `awaz doctor` before the first transcription. Install the bundled Pi adapter from `integrations/pi`.
 
-Do not move only the executable. Awaz resolves bundled models and platform libraries relative to it. The archives do not require a source setup, Rust, Python, or uv.
+Do not move only the executable. Awaz resolves its platform libraries relative to it. Speech models are not bundled: on first use Awaz downloads the selected model into the user cache (`~/.cache/awaz` on Linux and macOS, `%LOCALAPPDATA%\awaz` on Windows), which requires `curl` and a network connection. The archives do not require a source setup, Rust, Python, or uv.
 
 The macOS and Windows archives are not signed. The operating system can require manual approval. macOS can also request microphone permission on the first run.
 
@@ -36,6 +35,6 @@ The macOS and Windows archives are not signed. The operating system can require 
 
 Awaz does not support Intel macOS. Windows arm64 remains a future target.
 
-The root `moonshine.version` file selects the runtime, model package, and packaged license version. The `moonshine.models` manifest selects all bundled language and model pairs.
+The root `moonshine.version` file selects the runtime and packaged license version. The first entry in `moonshine.models` is the default model; models are fetched on first use from the manifest the Moonshine library returns.
 
 macOS signing/notarization and Windows Authenticode signing are separate distribution-hardening steps and require project-owned signing identities/secrets; the workflow is intentionally usable before those secrets exist.

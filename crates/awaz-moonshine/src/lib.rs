@@ -4,7 +4,7 @@ use awaz_core::{AudioChunk, Recognizer, RecognizerError, SpeechEvent};
 use ffi::*;
 use std::{
     cell::Cell,
-    ffi::{CStr, CString},
+    ffi::{CStr, CString, c_char, c_void},
     marker::PhantomData,
     path::{Path, PathBuf},
     ptr, slice,
@@ -48,10 +48,26 @@ impl std::str::FromStr for ModelSize {
     }
 }
 
+/// Root directory for cached files. Unix (including macOS) uses
+/// `$XDG_CACHE_HOME` or `~/.cache`; Windows uses `%LOCALAPPDATA%`.
+fn cache_root() -> Option<PathBuf> {
+    #[cfg(target_os = "windows")]
+    {
+        std::env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .or_else(|| directories::BaseDirs::new().map(|dirs| dirs.cache_dir().to_path_buf()))
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        std::env::var_os("XDG_CACHE_HOME")
+            .map(PathBuf::from)
+            .or_else(|| directories::BaseDirs::new().map(|dirs| dirs.home_dir().join(".cache")))
+    }
+}
+
 pub fn default_model_dir(language: &str, size: ModelSize) -> Option<PathBuf> {
-    directories::BaseDirs::new().map(|dirs| {
-        dirs.cache_dir()
-            .join("awaz/models/moonshine")
+    cache_root().map(|root| {
+        root.join("awaz/models/moonshine")
             .join(language)
             .join(size.slug())
     })
@@ -104,6 +120,44 @@ impl MoonshineRecognizer {
     pub fn library_version() -> i32 {
         // SAFETY: This function takes no pointers and reads library metadata.
         unsafe { moonshine_get_version() }
+    }
+
+    /// Returns the download manifest JSON for `language` and `model` from the
+    /// Moonshine library. The caller parses it to fetch model files.
+    pub fn model_manifest(language: &str, model: ModelSize) -> Result<String, RecognizerError> {
+        let language =
+            CString::new(language).map_err(|err| RecognizerError::Operation(err.to_string()))?;
+        let arch = CString::new(model.arch().to_string())
+            .map_err(|err| RecognizerError::Operation(err.to_string()))?;
+        let option_name = CString::new("model_arch")
+            .map_err(|err| RecognizerError::Operation(err.to_string()))?;
+        let options = [MoonshineOption {
+            name: option_name.as_ptr(),
+            value: arch.as_ptr(),
+        }];
+
+        let mut out: *mut c_char = ptr::null_mut();
+        // SAFETY: All C strings are live for the call. `out` is a valid output
+        // pointer; on success Moonshine writes a malloc'd, NUL-terminated string.
+        check(unsafe {
+            moonshine_get_stt_dependencies(
+                language.as_ptr(),
+                options.as_ptr(),
+                options.len() as u64,
+                &mut out,
+            )
+        })?;
+        if out.is_null() {
+            return Err(RecognizerError::Unavailable("empty model manifest".into()));
+        }
+
+        // SAFETY: `out` is non-null and NUL-terminated after a successful call.
+        let json = unsafe { CStr::from_ptr(out) }
+            .to_string_lossy()
+            .into_owned();
+        // SAFETY: Moonshine allocated `out` with malloc; free() releases it.
+        unsafe { free(out as *mut c_void) };
+        Ok(json)
     }
 
     fn read_transcript(&mut self) -> Result<Vec<SpeechEvent>, RecognizerError> {

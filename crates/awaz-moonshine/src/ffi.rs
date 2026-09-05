@@ -1,4 +1,4 @@
-use std::ffi::c_char;
+use std::ffi::{c_char, c_void};
 
 pub const MOONSHINE_HEADER_VERSION: i32 = 30_000;
 pub const MODEL_TINY_STREAMING: u32 = 2;
@@ -94,6 +94,16 @@ unsafe extern "C" {
         flags: u32,
         out_transcript: *mut *mut Transcript,
     ) -> i32;
+    pub fn moonshine_get_stt_dependencies(
+        language: *const c_char,
+        options: *const MoonshineOption,
+        options_count: u64,
+        out_dependencies_json: *mut *mut c_char,
+    ) -> i32;
+}
+
+unsafe extern "C" {
+    pub fn free(ptr: *mut c_void);
 }
 
 #[cfg(all(test, target_pointer_width = "64"))]
