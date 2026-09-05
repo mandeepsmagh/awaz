@@ -112,9 +112,10 @@ awaz transcribe recording.wav
 awaz serve
 ```
 
-The first entry in `moonshine.models` is the default recognizer. English Small Streaming is the current default. Add one or more language and model pairs before running setup:
+The first entry in `moonshine.models` is the default recognizer. English Medium Streaming is the current default. Add one or more language and model pairs before running setup:
 
 ```text
+en medium
 en small
 en tiny
 es small

@@ -2,6 +2,10 @@
 
 All notable changes to Awaz are documented here.
 
+## 0.1.2 - English Medium default
+
+- Use English Medium Streaming as the default Moonshine model.
+
 ## 0.1.1 - macOS audio diagnostics
 
 - Fixed a panic when a macOS audio device reports no readable description.
