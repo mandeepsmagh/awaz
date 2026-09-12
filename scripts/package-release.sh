@@ -12,6 +12,11 @@ bin="$ROOT/target/release/awaz"
 [[ -f "$bin.exe" ]] && bin="$bin.exe"
 [[ -f "$bin" ]] || { echo "Release binary missing: run cargo build --release -p awaz-cli" >&2; exit 3; }
 cp "$bin" "$OUT/"
+if [[ "$(uname -s)" == Darwin ]]; then
+  apple_helper="$ROOT/target/release/awaz-apple-speech"
+  [[ -f "$apple_helper" ]] || { echo "Apple Speech helper missing: rebuild awaz-cli" >&2; exit 3; }
+  cp "$apple_helper" "$OUT/"
+fi
 
 if [[ -d "$ROOT/vendor/moonshine/lib" ]]; then
   case "$(uname -s)" in

@@ -1,4 +1,5 @@
 use anyhow::{Context, Result, anyhow};
+use awaz_apple_speech::AppleSpeechRecognizer;
 use awaz_audio::{AudioCapture, CaptureConfig, list_input_devices};
 use awaz_core::{Command, Event, Recognizer, RecognizerError, SpeechEvent, VoiceState};
 use awaz_moonshine::{ModelSize, MoonshineRecognizer, default_model_dir};
@@ -39,6 +40,22 @@ enum CliCommand {
     Serve(ServeArgs),
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
+enum ProviderArg {
+    #[default]
+    Moonshine,
+    Apple,
+}
+
+impl ProviderArg {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Moonshine => "moonshine",
+            Self::Apple => "apple",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum ModelArg {
     Tiny,
@@ -58,19 +75,27 @@ impl From<ModelArg> for ModelSize {
 
 #[derive(Args, Debug, Clone)]
 struct CommonArgs {
+    #[arg(
+        long,
+        value_enum,
+        default_value_t,
+        env = "AWAZ_PROVIDER",
+        help = "Speech provider"
+    )]
+    provider: ProviderArg,
     #[arg(long, env = "AWAZ_LANGUAGE", help = "Language code, for example `en`")]
     language: Option<String>,
     #[arg(
         long,
         value_enum,
         env = "AWAZ_MODEL",
-        help = "Model size; downloaded on first use"
+        help = "Moonshine model size; downloaded on first use"
     )]
     model: Option<ModelArg>,
     #[arg(
         long,
         env = "AWAZ_MODEL_DIR",
-        help = "Use a pre-staged model directory instead of the cache"
+        help = "Use a pre-staged Moonshine model directory instead of the cache"
     )]
     model_dir: Option<PathBuf>,
 }
@@ -189,18 +214,41 @@ fn model_path(common: &CommonArgs) -> Result<(String, PathBuf, ModelSize)> {
     Ok((language, path, size))
 }
 
-fn load_recognizer(common: &CommonArgs) -> Result<MoonshineRecognizer> {
-    let (language, path, size) = model_path(common)?;
-    if !path.exists() {
-        if common.model_dir.is_some() {
-            return Err(anyhow!("Moonshine model not found at {}.", path.display()));
+struct LoadedRecognizer {
+    provider: &'static str,
+    recognizer: Box<dyn Recognizer>,
+}
+
+fn load_recognizer(common: &CommonArgs) -> Result<LoadedRecognizer> {
+    let recognizer: Box<dyn Recognizer> = match common.provider {
+        ProviderArg::Moonshine => {
+            let (language, path, size) = model_path(common)?;
+            if !path.exists() {
+                if common.model_dir.is_some() {
+                    return Err(anyhow!("Moonshine model not found at {}.", path.display()));
+                }
+                let cache = default_model_dir(&language, size)
+                    .ok_or_else(|| anyhow!("cannot determine model directory"))?;
+                download_model(&language, size, &cache)?;
+                Box::new(MoonshineRecognizer::load(&cache, size).map_err(anyhow::Error::from)?)
+            } else {
+                Box::new(MoonshineRecognizer::load(&path, size).map_err(anyhow::Error::from)?)
+            }
         }
-        let cache = default_model_dir(&language, size)
-            .ok_or_else(|| anyhow!("cannot determine model directory"))?;
-        download_model(&language, size, &cache)?;
-        return MoonshineRecognizer::load(&cache, size).map_err(anyhow::Error::from);
-    }
-    MoonshineRecognizer::load(&path, size).map_err(anyhow::Error::from)
+        ProviderArg::Apple => {
+            if common.model.is_some() || common.model_dir.is_some() {
+                return Err(anyhow!(
+                    "--model and --model-dir apply only to the Moonshine provider; Apple models are managed by macOS"
+                ));
+            }
+            let language = common.language.as_deref().unwrap_or("en");
+            Box::new(AppleSpeechRecognizer::load(language).map_err(anyhow::Error::from)?)
+        }
+    };
+    Ok(LoadedRecognizer {
+        provider: common.provider.name(),
+        recognizer,
+    })
 }
 
 fn download_model(language: &str, size: ModelSize, dest: &Path) -> Result<()> {
@@ -281,21 +329,29 @@ fn doctor(common: CommonArgs) -> Result<()> {
     eprintln!("  audio capture      ready ({})", capture.device_name);
     drop(capture);
 
-    let (_, path, size) = model_path(&common)?;
-    eprintln!("  model              {} ({})", size.slug(), path.display());
+    match common.provider {
+        ProviderArg::Moonshine => {
+            let (_, path, size) = model_path(&common)?;
+            eprintln!("  model              {} ({})", size.slug(), path.display());
+        }
+        ProviderArg::Apple => eprintln!("  model              managed by macOS"),
+    }
 
-    let recognizer = load_recognizer(&common)?;
-    drop(recognizer);
-    eprintln!(
-        "  moonshine          ready (library {})",
-        MoonshineRecognizer::library_version()
-    );
+    let loaded = load_recognizer(&common)?;
+    drop(loaded.recognizer);
+    match common.provider {
+        ProviderArg::Moonshine => eprintln!(
+            "  moonshine          ready (library {})",
+            MoonshineRecognizer::library_version()
+        ),
+        ProviderArg::Apple => eprintln!("  apple speech        ready"),
+    }
     eprintln!("  status             ready");
     Ok(())
 }
 
 fn mic(args: MicArgs) -> Result<()> {
-    let mut recognizer = load_recognizer(&args.common)?;
+    let LoadedRecognizer { mut recognizer, .. } = load_recognizer(&args.common)?;
     let save_wav = args.save_wav;
     let capture = AudioCapture::start(CaptureConfig {
         device_name: args.device,
@@ -321,6 +377,7 @@ fn mic(args: MicArgs) -> Result<()> {
     recognizer.start().map_err(anyhow::Error::from)?;
     eprintln!("listening…");
     let audio_rx = capture.receiver();
+    let poll_tick = tick(Duration::from_millis(80));
     let mut saved = save_wav.as_ref().map(|_| Vec::<f32>::new());
 
     loop {
@@ -334,7 +391,18 @@ fn mic(args: MicArgs) -> Result<()> {
                     recognizer.push_audio(&chunk).map_err(anyhow::Error::from)?;
                 }
             }
-            default(Duration::from_millis(80)) => {
+            recv(poll_tick) -> _ => {
+                // Catch up before inference. A slow previous poll can leave audio
+                // queued, and polling that stale prefix adds avoidable live latency.
+                for _ in 0..audio_rx.len() {
+                    let Ok(chunk) = audio_rx.try_recv() else {
+                        break;
+                    };
+                    if let Some(buffer) = saved.as_mut() {
+                        buffer.extend_from_slice(&chunk.samples);
+                    }
+                    recognizer.push_audio(&chunk).map_err(anyhow::Error::from)?;
+                }
                 for event in recognizer.poll().map_err(anyhow::Error::from)? {
                     if let SpeechEvent::Partial(text) = event {
                         eprint!("\r{text}\x1b[K");
@@ -422,7 +490,7 @@ fn transcribe(args: TranscribeArgs) -> Result<()> {
         }
     };
 
-    let mut recognizer = load_recognizer(&args.common)?;
+    let LoadedRecognizer { mut recognizer, .. } = load_recognizer(&args.common)?;
     recognizer.start().map_err(anyhow::Error::from)?;
     for samples in samples.chunks((spec.sample_rate as usize / 10).max(1)) {
         recognizer
@@ -453,7 +521,10 @@ fn signed_pcm_scale(bits_per_sample: u16) -> Result<f32> {
 }
 
 fn serve(args: ServeArgs) -> Result<()> {
-    let mut recognizer = load_recognizer(&args.common)?;
+    let LoadedRecognizer {
+        provider,
+        mut recognizer,
+    } = load_recognizer(&args.common)?;
     let capture = AudioCapture::start(CaptureConfig {
         device_name: args.device,
         ..Default::default()
@@ -468,7 +539,7 @@ fn serve(args: ServeArgs) -> Result<()> {
 
     emit(&Event::Ready {
         version: env!("CARGO_PKG_VERSION").into(),
-        provider: "moonshine".into(),
+        provider: provider.into(),
     })?;
     emit(&Event::Capabilities {
         stt: true,
@@ -486,7 +557,7 @@ fn serve(args: ServeArgs) -> Result<()> {
                         if handle_command(
                             command,
                             &mut state,
-                            &mut recognizer,
+                            recognizer.as_mut(),
                             &mut preroll,
                             &audio_rx,
                             &capture,
@@ -509,6 +580,9 @@ fn serve(args: ServeArgs) -> Result<()> {
             }
             recv(poll_tick) -> _ => {
                 if state == VoiceState::Listening {
+                    // Inference can take longer than one audio callback. Feed all
+                    // queued chunks before the next poll so recognition stays near live.
+                    feed_queued_audio(recognizer.as_mut(), &audio_rx, state)?;
                     for event in require_recognizer(recognizer.poll(), state)? {
                         emit_speech(event)?;
                     }
@@ -555,7 +629,7 @@ fn command_reader() -> Receiver<std::result::Result<Command, String>> {
 fn handle_command(
     command: Command,
     state: &mut VoiceState,
-    recognizer: &mut MoonshineRecognizer,
+    recognizer: &mut dyn Recognizer,
     preroll: &mut VecDeque<f32>,
     audio_rx: &Receiver<awaz_core::AudioChunk>,
     capture: &AudioCapture,
@@ -645,11 +719,26 @@ fn handle_command(
 }
 
 fn drain_pending_audio(
-    recognizer: &mut MoonshineRecognizer,
+    recognizer: &mut dyn Recognizer,
     audio_rx: &Receiver<awaz_core::AudioChunk>,
     state: VoiceState,
 ) -> Result<()> {
     while let Ok(chunk) = audio_rx.try_recv() {
+        require_recognizer(recognizer.push_audio(&chunk), state)?;
+    }
+    Ok(())
+}
+
+fn feed_queued_audio(
+    recognizer: &mut dyn Recognizer,
+    audio_rx: &Receiver<awaz_core::AudioChunk>,
+    state: VoiceState,
+) -> Result<()> {
+    // Use a snapshot so a live producer cannot keep this loop from reaching inference.
+    for _ in 0..audio_rx.len() {
+        let Ok(chunk) = audio_rx.try_recv() else {
+            break;
+        };
         require_recognizer(recognizer.push_audio(&chunk), state)?;
     }
     Ok(())
@@ -709,5 +798,24 @@ mod tests {
         let mut preroll = VecDeque::new();
         retain_preroll(&mut preroll, 3, vec![1.0, 2.0, 3.0, 4.0]);
         assert_eq!(preroll.into_iter().collect::<Vec<_>>(), vec![2.0, 3.0, 4.0]);
+    }
+
+    #[test]
+    fn provider_defaults_to_moonshine() {
+        let cli = Cli::try_parse_from(["awaz", "transcribe", "audio.wav"]).unwrap();
+        let CliCommand::Transcribe(args) = cli.command else {
+            panic!("expected transcribe command");
+        };
+        assert_eq!(args.common.provider, ProviderArg::Moonshine);
+    }
+
+    #[test]
+    fn apple_provider_is_selectable() {
+        let cli = Cli::try_parse_from(["awaz", "transcribe", "--provider", "apple", "audio.wav"])
+            .unwrap();
+        let CliCommand::Transcribe(args) = cli.command else {
+            panic!("expected transcribe command");
+        };
+        assert_eq!(args.common.provider, ProviderArg::Apple);
     }
 }

@@ -38,6 +38,8 @@ transcript events
 - Bounded audio queue; capture does not block on inference.
 - 450 ms configurable pre-roll in machine/agent mode.
 - Moonshine streaming STT through its documented C ABI.
+- Apple Speech streaming STT through a provider-local Swift helper on macOS 26+.
+- `--provider moonshine|apple` selection; Moonshine remains the portable default.
 - Runtime key-term and free-form context biasing.
 - `awaz mic` push-to-talk CLI.
 - `awaz transcribe FILE.wav` for mono WAV input.
@@ -108,11 +110,15 @@ awaz devices
 awaz doctor
 awaz mic
 awaz mic --device "My Microphone"
+awaz mic --provider apple
 awaz transcribe recording.wav
+awaz transcribe --provider apple recording.wav
 awaz serve
 ```
 
-The first entry in `moonshine.models` is the default recognizer. English Small Streaming is the current default. Select a model with `--model` (or `--language`); Awaz downloads that model on first use and caches it:
+Moonshine is the default provider. Select Apple Speech on macOS 26 or newer with `--provider apple` (or `AWAZ_PROVIDER=apple`). macOS manages and downloads Apple language assets on demand. `--model` and `--model-dir` apply only to Moonshine.
+
+The first entry in `moonshine.models` is the default Moonshine model. English Small Streaming is the current default. Select a Moonshine model with `--model` (or `--language`); Awaz downloads that model on first use and caches it:
 
 ```bash
 awaz mic --model tiny
@@ -175,6 +181,7 @@ Environment overrides (read once per session, when Awaz starts):
 
 ```text
 AWAZ_BIN       path to the awaz binary (default: awaz on PATH)
+AWAZ_PROVIDER  moonshine | apple (default: moonshine)
 AWAZ_LANGUAGE  language code (default: en)
 AWAZ_MODEL     tiny | small | medium (default: small)
 AWAZ_MODEL_DIR use a pre-staged model directory instead of the cache
@@ -201,7 +208,7 @@ Target architecture:
 |---|---|---|---|
 | NixOS / Linux x86_64 | CPAL → PipeWire/ALSA | Moonshine native | first-class |
 | Linux arm64 | CPAL → PipeWire/ALSA | Moonshine native | release target |
-| macOS 26+ on Apple Silicon | CPAL → CoreAudio | Moonshine native | first-class |
+| macOS 26+ on Apple Silicon | CPAL → CoreAudio | Moonshine or Apple Speech | first-class |
 | Windows x86_64 | CPAL → WASAPI | Moonshine native | portable / CI target |
 | Windows arm64 | CPAL → WASAPI | provider-dependent | future release target |
 

@@ -12,6 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow.workspace = true
+awaz-apple-speech = { path = "../awaz-apple-speech" }
 awaz-audio = { path = "../awaz-audio" }
 awaz-core = { path = "../awaz-core" }
 awaz-moonshine = { path = "../awaz-moonshine" }

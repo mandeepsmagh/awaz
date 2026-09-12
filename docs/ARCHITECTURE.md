@@ -13,11 +13,12 @@ Awaz owns audio and lifecycle. Speech engines are providers. Editors, agents, an
               /         \
       awaz-audio       provider contract
           │                  │
-         CPAL          awaz-moonshine
-          │                  │
- PipeWire/CoreAudio       C ABI
-     /WASAPI                 │
-          │            Moonshine/ONNX
+         CPAL          speech providers
+          │             /           \
+ PipeWire/CoreAudio  Moonshine    Apple Speech
+     /WASAPI          C ABI      Swift helper
+          │              │            │
+   mic / speaker   Moonshine/ONNX  macOS assets
    mic / speaker
 ```
 
@@ -59,6 +60,8 @@ set_context
 Provider-specific concepts do not appear in protocol or integrations.
 
 Moonshine is implemented in `awaz-moonshine` through a small handwritten C ABI binding. This avoids `bindgen` and generated bindings. macOS builds link the Clang runtime required by the prebuilt Moonshine library.
+
+Apple Speech is implemented in `awaz-apple-speech`. A small Swift helper adapts `SpeechAnalyzer` and `SpeechTranscriber` to the Rust contract. It receives PCM from Awaz through local pipes and never opens the microphone. macOS downloads and manages its language assets.
 
 ## State machine
 

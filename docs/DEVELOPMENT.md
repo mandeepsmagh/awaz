@@ -22,17 +22,20 @@ Each protocol error includes the authoritative voice state. It also states wheth
 
 Keep unsafe Rust in `awaz-moonshine`. Document the safety contract at each unsafe operation. Do not expose native pointers or handles through its safe API.
 
+`awaz-apple-speech` builds a small Swift helper on macOS. The helper receives mono `f32` PCM from Rust and adapts it to the format required by `SpeechAnalyzer`. It must not open the microphone. Keep its pipe protocol private to the provider. `scripts/package-release.sh` places the helper beside `awaz`.
+
 ## CI
 
 Use current Node 24 action patch tags and GitHub's latest hosted runner aliases. Keep an explicit runner label when GitHub has no architecture-specific latest alias. The workflows stage only the Moonshine runtime; no Python or uv is involved. The release workflow packages no model weights, so model downloads happen on first use.
 
 ## Checks
 
-Run these checks before a commit:
+Run these checks before a commit. Run the final Swift command only on macOS.
 
 ```text
 cargo fmt --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo build --release -p awaz-cli
+xcrun swiftc -parse-as-library -O -warnings-as-errors crates/awaz-apple-speech/src/AppleSpeechBridge.swift -o /tmp/awaz-apple-speech
 ```

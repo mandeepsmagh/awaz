@@ -85,6 +85,9 @@ export default function awazExtension(pi: ExtensionAPI) {
     const myGeneration = ++generation;
     const binary = process.env.AWAZ_BIN || "awaz";
     const args = ["serve"];
+    if (process.env.AWAZ_PROVIDER) {
+      args.push("--provider", process.env.AWAZ_PROVIDER);
+    }
     if (process.env.AWAZ_MODEL_DIR) {
       args.push("--model-dir", process.env.AWAZ_MODEL_DIR);
     }

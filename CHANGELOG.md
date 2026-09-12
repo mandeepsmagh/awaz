@@ -2,6 +2,14 @@
 
 All notable changes to Awaz are documented here.
 
+## Unreleased
+
+- Add `--provider moonshine|apple` and `AWAZ_PROVIDER`.
+- Add Apple Speech through a provider-local Swift helper on macOS 26 or newer.
+- Let macOS download and manage Apple language assets on demand.
+- Poll Moonshine on a fixed tick and feed queued audio before inference to reduce live transcript latency.
+- Package the Apple Speech helper beside the Awaz executable.
+
 ## 0.2.2 - Pi integration starts lazily
 
 - Start Awaz in Pi only on the first `Alt+R` or `/awaz`, not at session start.

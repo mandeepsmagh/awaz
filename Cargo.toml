@@ -2,6 +2,7 @@
 members = [
   "crates/awaz-core",
   "crates/awaz-audio",
+  "crates/awaz-apple-speech",
   "crates/awaz-moonshine",
   "crates/awaz-cli",
 ]
