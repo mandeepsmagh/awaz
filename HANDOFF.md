@@ -2,7 +2,7 @@
 
 ## Status
 
-Moonshine and Apple Speech are working STT providers. Select them with `--provider moonshine|apple` or `AWAZ_PROVIDER`. Moonshine remains the portable default and downloads its selected model on demand. macOS downloads Apple language assets on demand. Apple file transcription is verified on macOS 26; microphone and packaged-release tests remain. The Pi integration forwards `AWAZ_PROVIDER`. The Moonshine live loop now polls on a fixed tick and feeds queued audio before inference, which prevents continuous capture or a slow poll from adding avoidable latency. Current release 0.2.2.
+Moonshine and Apple Speech are working STT providers. Select them with `--provider moonshine|apple` or `AWAZ_PROVIDER`. Moonshine remains the portable default and downloads its selected model on demand. macOS downloads Apple language assets on demand. Apple file transcription is verified on macOS 26; microphone and packaged-release tests remain. The Pi integration forwards `AWAZ_PROVIDER`. The Moonshine live loop now polls on a fixed tick and feeds queued audio before inference, which prevents continuous capture or a slow poll from adding avoidable latency. Current release 0.3.0.
 
 ## Next
 

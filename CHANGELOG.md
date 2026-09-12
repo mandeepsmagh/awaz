@@ -2,7 +2,7 @@
 
 All notable changes to Awaz are documented here.
 
-## Unreleased
+## 0.3.0 - Apple Speech provider
 
 - Add `--provider moonshine|apple` and `AWAZ_PROVIDER`.
 - Add Apple Speech through a provider-local Swift helper on macOS 26 or newer.
