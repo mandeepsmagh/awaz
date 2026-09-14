@@ -35,14 +35,14 @@ transcript events
 
 - Rust 2024 workspace.
 - CPAL microphone capture with PipeWire preference on Linux and native platform backends elsewhere.
-- Bounded audio queue; capture does not block on inference.
+- Bounded capture and recognizer queues; capture and protocol control do not block on inference.
 - 450 ms configurable pre-roll in machine/agent mode.
 - Moonshine streaming STT through its documented C ABI.
 - Apple Speech streaming STT through a provider-local Swift helper on macOS 26+.
 - `--provider moonshine|apple` selection; Moonshine remains the portable default.
 - Runtime key-term and free-form context biasing.
 - `awaz mic` push-to-talk CLI.
-- `awaz transcribe FILE.wav` for mono WAV input.
+- `awaz transcribe FILE.wav` for bounded-memory mono WAV input.
 - On-demand model download on first use, cached under `~/.cache/awaz`.
 - `--save-wav` capture dump and dropped-audio-chunk warnings for debugging.
 - `awaz devices` and `awaz doctor`.
@@ -198,7 +198,7 @@ The release workflow stages the Moonshine runtime library beside the `awaz` bina
 2. a `models/moonshine/<language>/<model>` directory beside the executable
 3. the user cache directory
 
-If none exists, Awaz downloads the selected model into the cache using the manifest returned by the Moonshine library itself, so the file layout stays in sync with the runtime version.
+If none exists, Awaz downloads the selected model into the cache using the manifest returned by the Moonshine library itself, so the file layout stays in sync with the runtime version. Awaz validates the declared file sizes and repairs an interrupted cache on the next run.
 
 ## Platform status
 

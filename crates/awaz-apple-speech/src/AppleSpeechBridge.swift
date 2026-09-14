@@ -259,6 +259,7 @@ private struct AppleSpeechBridge {
         do {
             try await recognizer.prepare()
             await writer.send(BridgeEvent(type: "ready"))
+            var finishTask: Task<Void, Never>?
 
             while let header = try readExactly(5), header.count == 5 {
                 let command = header[header.startIndex]
@@ -286,13 +287,18 @@ private struct AppleSpeechBridge {
                     }
                     try await recognizer.feed(samples: samples, sampleRate: sampleRate)
                 case 3:
-                    await recognizer.finish()
-                    await writer.send(BridgeEvent(type: "finished"))
+                    finishTask = Task.detached {
+                        await recognizer.finish()
+                        await writer.send(BridgeEvent(type: "finished"))
+                    }
                 case 4:
                     await recognizer.cancel()
                     await writer.send(BridgeEvent(type: "cancelled"))
+                    await finishTask?.value
+                    finishTask = nil
                 case 5:
                     await recognizer.cancel()
+                    await finishTask?.value
                     return
                 default:
                     throw BridgeError.unknownCommand(command)

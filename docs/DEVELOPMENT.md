@@ -12,11 +12,11 @@ The Cargo configuration sets the macOS deployment target to 26.0. The Moonshine 
 
 ## Moonshine updates
 
-Change `moonshine.version` to select a new Moonshine release. The runtime download and release packaging scripts read this file. Git keeps the version and model files in LF format, and the loader also accepts CRLF input. The first entry in `moonshine.models` is the runtime default model; one Awaz process loads one model. Model weights are downloaded on first use into the user cache (`~/.cache/awaz` on Linux and macOS) using the manifest from `moonshine_get_stt_dependencies`, so the file layout tracks the runtime version and no CDN paths are hardcoded. `MOONSHINE_HEADER_VERSION` is a separate C ABI value. Update it only after comparing `moonshine-c-api.h` with the handwritten FFI declarations.
+Change `moonshine.version` to select a new Moonshine release. The runtime download and release packaging scripts read this file. Git keeps the version and model files in LF format, and the loader also accepts CRLF input. The first entry in `moonshine.models` is the runtime default model; one Awaz process loads one model. Model weights are downloaded on first use into the user cache (`~/.cache/awaz` on Linux and macOS) using the manifest from `moonshine_get_stt_dependencies`, so the file layout tracks the runtime version and no CDN paths are hardcoded. Awaz validates every declared file on each load. It serializes concurrent downloads, validates temporary file sizes, and renames each file only after validation. An interrupted download must repair itself on the next run. `MOONSHINE_HEADER_VERSION` is a separate C ABI value. Update it only after comparing `moonshine-c-api.h` with the handwritten FFI declarations.
 
 ## Error protocol
 
-Each protocol error includes the authoritative voice state. It also states whether the process must exit. Integrations must synchronize to that state after recoverable errors.
+Each protocol error includes the authoritative voice state. It also states whether the process must exit. Integrations must synchronize to that state after recoverable errors. Audio stream failures are fatal protocol errors. Optional provider operations return `unsupported` when a provider does not implement them.
 
 ## Native code
 

@@ -9,8 +9,9 @@ mod platform {
         io::{BufRead, BufReader, Write},
         path::PathBuf,
         process::{Child, ChildStdin, Command, Stdio},
+        sync::atomic::{AtomicBool, Ordering},
         thread,
-        time::Duration,
+        time::{Duration, Instant},
     };
 
     const START: u8 = 1;
@@ -18,6 +19,9 @@ mod platform {
     const FINISH: u8 = 3;
     const CANCEL: u8 = 4;
     const SHUTDOWN: u8 = 5;
+    const OPERATION_TIMEOUT: Duration = Duration::from_secs(30);
+    const FINISH_TIMEOUT: Duration = Duration::from_secs(120);
+    const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 
     enum HelperEvent {
         Ready,
@@ -34,6 +38,7 @@ mod platform {
         input: ChildStdin,
         events: Receiver<HelperEvent>,
         active: bool,
+        audio_seconds: f64,
     }
 
     impl AppleSpeechRecognizer {
@@ -75,6 +80,7 @@ mod platform {
                 input,
                 events,
                 active: false,
+                audio_seconds: 0.0,
             };
             match recognizer
                 .events
@@ -103,14 +109,82 @@ mod platform {
 
         fn wait_for(&self, expected: fn(&HelperEvent) -> bool) -> Result<(), RecognizerError> {
             loop {
-                match self.events.recv() {
+                match self.events.recv_timeout(OPERATION_TIMEOUT) {
                     Ok(event) if expected(&event) => return Ok(()),
                     Ok(HelperEvent::Error(message)) => {
                         return Err(RecognizerError::Operation(message));
                     }
                     Ok(_) => {}
-                    Err(error) => return Err(RecognizerError::Operation(error.to_string())),
+                    Err(error) => {
+                        return Err(RecognizerError::Operation(format!(
+                            "Apple Speech did not respond: {error}"
+                        )));
+                    }
                 }
+            }
+        }
+
+        fn finish_events(
+            &mut self,
+            cancelled: Option<&AtomicBool>,
+        ) -> Result<Vec<SpeechEvent>, RecognizerError> {
+            if !self.active {
+                return Ok(vec![SpeechEvent::Final(String::new())]);
+            }
+            self.send(FINISH, &[])?;
+            let timeout = FINISH_TIMEOUT.max(Duration::from_secs_f64(
+                self.audio_seconds.mul_add(2.0, 30.0),
+            ));
+            let deadline = Instant::now() + timeout;
+            let mut cancel_sent = false;
+            let mut finished = false;
+            let mut cancelled_acknowledged = false;
+            let mut speech = Vec::new();
+            loop {
+                if !cancel_sent && cancelled.is_some_and(|flag| flag.load(Ordering::Acquire)) {
+                    self.send(CANCEL, &[])?;
+                    cancel_sent = true;
+                }
+
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                if remaining.is_zero() {
+                    return Err(RecognizerError::Operation(
+                        "timed out finalizing Apple Speech".into(),
+                    ));
+                }
+                let wait = remaining.min(Duration::from_millis(50));
+                match self.events.recv_timeout(wait) {
+                    Ok(HelperEvent::Partial(text)) => speech.push(SpeechEvent::Partial(text)),
+                    Ok(HelperEvent::Final(text)) => speech.push(SpeechEvent::Final(text)),
+                    Ok(HelperEvent::Finished) => {
+                        finished = true;
+                        if !cancel_sent || cancelled_acknowledged {
+                            break;
+                        }
+                    }
+                    Ok(HelperEvent::Cancelled) => {
+                        cancelled_acknowledged = true;
+                        if finished {
+                            break;
+                        }
+                    }
+                    Ok(HelperEvent::Error(message)) => {
+                        return Err(RecognizerError::Operation(message));
+                    }
+                    Ok(_) | Err(crossbeam_channel::RecvTimeoutError::Timeout) => {}
+                    Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
+                        return Err(RecognizerError::Operation(
+                            "Apple Speech helper stopped while finalizing".into(),
+                        ));
+                    }
+                }
+            }
+            self.active = false;
+            self.audio_seconds = 0.0;
+            if cancel_sent {
+                Ok(Vec::new())
+            } else {
+                Ok(speech)
             }
         }
     }
@@ -123,6 +197,7 @@ mod platform {
             self.send(START, &[])?;
             self.wait_for(|event| matches!(event, HelperEvent::Started))?;
             self.active = true;
+            self.audio_seconds = 0.0;
             Ok(())
         }
 
@@ -135,7 +210,9 @@ mod platform {
             for sample in &chunk.samples {
                 payload.extend_from_slice(&sample.to_le_bytes());
             }
-            self.send(AUDIO, &payload)
+            self.send(AUDIO, &payload)?;
+            self.audio_seconds += chunk.duration_seconds() as f64;
+            Ok(())
         }
 
         fn poll(&mut self) -> Result<Vec<SpeechEvent>, RecognizerError> {
@@ -154,25 +231,14 @@ mod platform {
         }
 
         fn finish(&mut self) -> Result<Vec<SpeechEvent>, RecognizerError> {
-            if !self.active {
-                return Ok(vec![SpeechEvent::Final(String::new())]);
-            }
-            self.send(FINISH, &[])?;
-            let mut speech = Vec::new();
-            loop {
-                match self.events.recv() {
-                    Ok(HelperEvent::Partial(text)) => speech.push(SpeechEvent::Partial(text)),
-                    Ok(HelperEvent::Final(text)) => speech.push(SpeechEvent::Final(text)),
-                    Ok(HelperEvent::Finished) => break,
-                    Ok(HelperEvent::Error(message)) => {
-                        return Err(RecognizerError::Operation(message));
-                    }
-                    Ok(_) => {}
-                    Err(error) => return Err(RecognizerError::Operation(error.to_string())),
-                }
-            }
-            self.active = false;
-            Ok(speech)
+            self.finish_events(None)
+        }
+
+        fn finish_cancellable(
+            &mut self,
+            cancelled: &AtomicBool,
+        ) -> Result<Vec<SpeechEvent>, RecognizerError> {
+            self.finish_events(Some(cancelled))
         }
 
         fn cancel(&mut self) -> Result<(), RecognizerError> {
@@ -181,6 +247,7 @@ mod platform {
                 self.wait_for(|event| matches!(event, HelperEvent::Cancelled))?;
             }
             self.active = false;
+            self.audio_seconds = 0.0;
             Ok(())
         }
     }
@@ -188,6 +255,14 @@ mod platform {
     impl Drop for AppleSpeechRecognizer {
         fn drop(&mut self) {
             let _ = self.send(SHUTDOWN, &[]);
+            let deadline = Instant::now() + SHUTDOWN_TIMEOUT;
+            while Instant::now() < deadline {
+                if self.child.try_wait().ok().flatten().is_some() {
+                    return;
+                }
+                thread::sleep(Duration::from_millis(20));
+            }
+            let _ = self.child.kill();
             let _ = self.child.wait();
         }
     }

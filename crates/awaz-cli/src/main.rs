@@ -4,13 +4,18 @@ use awaz_audio::{AudioCapture, CaptureConfig, list_input_devices};
 use awaz_core::{Command, Event, Recognizer, RecognizerError, SpeechEvent, VoiceState};
 use awaz_moonshine::{ModelSize, MoonshineRecognizer, default_model_dir};
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use crossbeam_channel::{Receiver, bounded, select, tick};
+use crossbeam_channel::{Receiver, Sender, TrySendError, bounded, select, select_biased, tick};
 use std::{
-    collections::VecDeque,
-    io::{self, BufRead, Write},
-    path::{Path, PathBuf},
+    collections::{HashSet, VecDeque},
+    fs::OpenOptions,
+    io::{self, BufRead, IsTerminal, Write},
+    path::{Component, Path, PathBuf},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     thread,
-    time::Duration,
+    time::{Duration, SystemTime},
 };
 
 const MOONSHINE_MODELS: &str = include_str!("../../../moonshine.models");
@@ -223,17 +228,14 @@ fn load_recognizer(common: &CommonArgs) -> Result<LoadedRecognizer> {
     let recognizer: Box<dyn Recognizer> = match common.provider {
         ProviderArg::Moonshine => {
             let (language, path, size) = model_path(common)?;
-            if !path.exists() {
-                if common.model_dir.is_some() {
-                    return Err(anyhow!("Moonshine model not found at {}.", path.display()));
+            if common.model_dir.is_some() {
+                if !path.is_dir() {
+                    return Err(anyhow!("Moonshine model not found at {}", path.display()));
                 }
-                let cache = default_model_dir(&language, size)
-                    .ok_or_else(|| anyhow!("cannot determine model directory"))?;
-                download_model(&language, size, &cache)?;
-                Box::new(MoonshineRecognizer::load(&cache, size).map_err(anyhow::Error::from)?)
-            } else {
-                Box::new(MoonshineRecognizer::load(&path, size).map_err(anyhow::Error::from)?)
+            } else if default_model_dir(&language, size).as_deref() == Some(path.as_path()) {
+                ensure_model(&language, size, &path)?;
             }
+            Box::new(MoonshineRecognizer::load(&path, size).map_err(anyhow::Error::from)?)
         }
         ProviderArg::Apple => {
             if common.model.is_some() || common.model_dir.is_some() {
@@ -251,16 +253,56 @@ fn load_recognizer(common: &CommonArgs) -> Result<LoadedRecognizer> {
     })
 }
 
-fn download_model(language: &str, size: ModelSize, dest: &Path) -> Result<()> {
-    eprintln!("downloading Moonshine {language} {} model…", size.slug());
+#[derive(Debug)]
+struct ModelFile {
+    name: String,
+    url: String,
+    size: Option<u64>,
+}
+
+struct DownloadLock(PathBuf);
+
+impl Drop for DownloadLock {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+fn ensure_model(language: &str, size: ModelSize, dest: &Path) -> Result<()> {
     let manifest =
         MoonshineRecognizer::model_manifest(language, size).map_err(anyhow::Error::from)?;
     let manifest: serde_json::Value = serde_json::from_str(&manifest)?;
-    std::fs::create_dir_all(dest)?;
+    let files = manifest_files(&manifest)?;
+    if files.iter().all(|file| model_file_complete(dest, file)) {
+        return Ok(());
+    }
 
-    let Some(groups) = manifest.get("groups").and_then(serde_json::Value::as_array) else {
-        return Err(anyhow!("model manifest has no groups"));
-    };
+    std::fs::create_dir_all(dest)?;
+    let _lock = acquire_download_lock(dest)?;
+    if files.iter().all(|file| model_file_complete(dest, file)) {
+        return Ok(());
+    }
+
+    eprintln!("downloading Moonshine {language} {} model…", size.slug());
+    for file in &files {
+        if model_file_complete(dest, file) {
+            continue;
+        }
+        download_model_file(dest, file)?;
+    }
+
+    if !files.iter().all(|file| model_file_complete(dest, file)) {
+        return Err(anyhow!("Moonshine model download is incomplete"));
+    }
+    Ok(())
+}
+
+fn manifest_files(manifest: &serde_json::Value) -> Result<Vec<ModelFile>> {
+    let groups = manifest
+        .get("groups")
+        .and_then(serde_json::Value::as_array)
+        .context("model manifest has no groups")?;
+    let mut out = Vec::new();
     for group in groups {
         let Some(files) = group.get("files").and_then(serde_json::Value::as_array) else {
             continue;
@@ -270,38 +312,116 @@ fn download_model(language: &str, size: ModelSize, dest: &Path) -> Result<()> {
                 .get("name")
                 .and_then(serde_json::Value::as_str)
                 .context("manifest entry missing name")?;
-            let url = file
-                .get("url")
-                .and_then(serde_json::Value::as_str)
-                .context("manifest entry missing url")?;
-            let target = dest.join(name);
-            let len = target.metadata().map(|meta| meta.len()).unwrap_or(0);
-            let expected = file.get("size").and_then(serde_json::Value::as_u64);
-            let complete = match expected {
-                Some(size) => len == size,
-                None => len > 0,
-            };
-            if complete {
-                continue;
+            let path = Path::new(name);
+            if path.as_os_str().is_empty()
+                || path
+                    .components()
+                    .any(|part| !matches!(part, Component::Normal(_)))
+            {
+                return Err(anyhow!("unsafe model manifest path: {name}"));
             }
-
-            // Download to a temporary name and rename only after success, so an
-            // interrupted download never leaves a file that looks complete.
-            let part = dest.join(format!("{name}.part"));
-            let status = std::process::Command::new("curl")
-                .args(["-fsSL", "--retry", "3", "-o"])
-                .arg(&part)
-                .arg(url)
-                .status()
-                .context("failed to run curl")?;
-            if !status.success() {
-                let _ = std::fs::remove_file(&part);
-                return Err(anyhow!("curl failed while downloading {name}"));
-            }
-            std::fs::rename(&part, &target).with_context(|| format!("finalize {name}"))?;
+            out.push(ModelFile {
+                name: name.to_owned(),
+                url: file
+                    .get("url")
+                    .and_then(serde_json::Value::as_str)
+                    .context("manifest entry missing url")?
+                    .to_owned(),
+                size: file.get("size").and_then(serde_json::Value::as_u64),
+            });
         }
     }
-    Ok(())
+    if out.is_empty() {
+        return Err(anyhow!("model manifest has no files"));
+    }
+    Ok(out)
+}
+
+fn model_file_complete(dest: &Path, file: &ModelFile) -> bool {
+    let len = dest.join(&file.name).metadata().map(|meta| meta.len()).ok();
+    match (len, file.size) {
+        (Some(actual), Some(expected)) => actual == expected,
+        (Some(actual), None) => actual > 0,
+        (None, _) => false,
+    }
+}
+
+fn acquire_download_lock(dest: &Path) -> Result<DownloadLock> {
+    let path = dest.join(".download.lock");
+    let mut announced = false;
+    for _ in 0..600 {
+        match OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(mut file) => {
+                let lock = DownloadLock(path);
+                writeln!(file, "{}", std::process::id())?;
+                return Ok(lock);
+            }
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                let stale = path
+                    .metadata()
+                    .and_then(|metadata| metadata.modified())
+                    .ok()
+                    .and_then(|modified| SystemTime::now().duration_since(modified).ok())
+                    .is_some_and(|age| age > Duration::from_secs(30 * 60));
+                if stale {
+                    let _ = std::fs::remove_file(&path);
+                    continue;
+                }
+                if !announced {
+                    eprintln!("waiting for another Awaz model download…");
+                    announced = true;
+                }
+                thread::sleep(Duration::from_secs(1));
+            }
+            Err(error) => return Err(error).context("create model download lock"),
+        }
+    }
+    Err(anyhow!("timed out waiting for the model download lock"))
+}
+
+fn download_model_file(dest: &Path, file: &ModelFile) -> Result<()> {
+    let target = dest.join(&file.name);
+    if let Some(parent) = target.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let file_name = target
+        .file_name()
+        .and_then(|name| name.to_str())
+        .context("model manifest has an invalid file name")?;
+    let part = target.with_file_name(format!(".{file_name}.part-{}", std::process::id()));
+    let status = std::process::Command::new("curl")
+        .args(["-fL", "--retry", "3", "--progress-bar", "-o"])
+        .arg(&part)
+        .arg(&file.url)
+        .status()
+        .context("failed to run curl; install curl or pre-stage the model with --model-dir")?;
+    if !status.success() {
+        let _ = std::fs::remove_file(&part);
+        return Err(anyhow!("curl failed while downloading {}", file.name));
+    }
+
+    let actual = part.metadata().map(|metadata| metadata.len())?;
+    let valid = file.size.map_or(actual > 0, |expected| actual == expected);
+    if !valid {
+        let _ = std::fs::remove_file(&part);
+        return Err(anyhow!(
+            "downloaded {} has size {actual}, expected {}",
+            file.name,
+            file.size
+                .map(|size| size.to_string())
+                .unwrap_or_else(|| "a non-empty file".into())
+        ));
+    }
+
+    match std::fs::rename(&part, &target) {
+        Ok(()) => Ok(()),
+        Err(_) if target.exists() => {
+            std::fs::remove_file(&target)
+                .with_context(|| format!("replace invalid model file {}", file.name))?;
+            std::fs::rename(&part, &target).with_context(|| format!("finalize {}", file.name))
+        }
+        Err(error) => Err(error).with_context(|| format!("finalize {}", file.name)),
+    }
 }
 
 fn devices() -> Result<()> {
@@ -351,6 +471,12 @@ fn doctor(common: CommonArgs) -> Result<()> {
 }
 
 fn mic(args: MicArgs) -> Result<()> {
+    if !io::stdin().is_terminal() {
+        return Err(anyhow!(
+            "`awaz mic` requires an interactive terminal; use `awaz transcribe` for a file or `awaz serve` for machine control"
+        ));
+    }
+    let ansi = io::stderr().is_terminal();
     let LoadedRecognizer { mut recognizer, .. } = load_recognizer(&args.common)?;
     let save_wav = args.save_wav;
     let capture = AudioCapture::start(CaptureConfig {
@@ -374,15 +500,24 @@ fn mic(args: MicArgs) -> Result<()> {
     });
 
     rx.recv()?;
+    let audio_rx = capture.receiver();
+    while audio_rx.try_recv().is_ok() {}
+    let dropped_at_start = capture.dropped_chunks();
     recognizer.start().map_err(anyhow::Error::from)?;
     eprintln!("listening…");
-    let audio_rx = capture.receiver();
+    let audio_errors = capture.error_receiver();
     let poll_tick = tick(Duration::from_millis(80));
     let mut saved = save_wav.as_ref().map(|_| Vec::<f32>::new());
 
     loop {
         select! {
             recv(rx) -> _ => break,
+            recv(audio_errors) -> message => {
+                return Err(anyhow!(
+                    "audio input failed while listening: {}",
+                    message.unwrap_or_else(|_| "audio error channel closed".into())
+                ));
+            }
             recv(audio_rx) -> message => {
                 if let Ok(chunk) = message {
                     if let Some(buffer) = saved.as_mut() {
@@ -405,8 +540,12 @@ fn mic(args: MicArgs) -> Result<()> {
                 }
                 for event in recognizer.poll().map_err(anyhow::Error::from)? {
                     if let SpeechEvent::Partial(text) = event {
-                        eprint!("\r{text}\x1b[K");
-                        let _ = io::stderr().flush();
+                        if ansi {
+                            eprint!("\r{text}\x1b[K");
+                            let _ = io::stderr().flush();
+                        } else {
+                            eprintln!("{text}");
+                        }
                     }
                 }
             }
@@ -437,7 +576,7 @@ fn mic(args: MicArgs) -> Result<()> {
         eprintln!("saved captured audio to {}", path.display());
     }
 
-    let dropped = capture.dropped_chunks();
+    let dropped = capture.dropped_chunks().saturating_sub(dropped_at_start);
     if dropped > 0 {
         eprintln!("warning: dropped {dropped} audio chunks while listening");
     }
@@ -472,30 +611,49 @@ fn transcribe(args: TranscribeArgs) -> Result<()> {
         return Err(anyhow!("WAV sample rate must be greater than zero"));
     }
 
-    let samples: Vec<f32> = match spec.sample_format {
-        hound::SampleFormat::Float => reader.samples::<f32>().collect::<Result<_, _>>()?,
-        hound::SampleFormat::Int if spec.bits_per_sample <= 16 => {
-            let scale = signed_pcm_scale(spec.bits_per_sample)?;
-            reader
-                .samples::<i16>()
-                .map(|sample| sample.map(|value| value as f32 / scale))
-                .collect::<Result<_, _>>()?
-        }
-        hound::SampleFormat::Int => {
-            let scale = signed_pcm_scale(spec.bits_per_sample)?;
-            reader
-                .samples::<i32>()
-                .map(|sample| sample.map(|value| value as f32 / scale))
-                .collect::<Result<_, _>>()?
-        }
-    };
-
     let LoadedRecognizer { mut recognizer, .. } = load_recognizer(&args.common)?;
     recognizer.start().map_err(anyhow::Error::from)?;
-    for samples in samples.chunks((spec.sample_rate as usize / 10).max(1)) {
+    let chunk_size = (spec.sample_rate as usize / 10).max(1);
+    let mut chunk = Vec::with_capacity(chunk_size);
+    {
+        let mut push_sample = |sample: f32| -> Result<()> {
+            chunk.push(sample);
+            if chunk.len() == chunk_size {
+                recognizer
+                    .push_audio(&awaz_core::AudioChunk {
+                        samples: std::mem::take(&mut chunk),
+                        sample_rate: spec.sample_rate,
+                    })
+                    .map_err(anyhow::Error::from)?;
+                chunk = Vec::with_capacity(chunk_size);
+            }
+            Ok(())
+        };
+
+        match spec.sample_format {
+            hound::SampleFormat::Float => {
+                for sample in reader.samples::<f32>() {
+                    push_sample(sample?)?;
+                }
+            }
+            hound::SampleFormat::Int if spec.bits_per_sample <= 16 => {
+                let scale = signed_pcm_scale(spec.bits_per_sample)?;
+                for sample in reader.samples::<i16>() {
+                    push_sample(sample? as f32 / scale)?;
+                }
+            }
+            hound::SampleFormat::Int => {
+                let scale = signed_pcm_scale(spec.bits_per_sample)?;
+                for sample in reader.samples::<i32>() {
+                    push_sample(sample? as f32 / scale)?;
+                }
+            }
+        }
+    }
+    if !chunk.is_empty() {
         recognizer
             .push_audio(&awaz_core::AudioChunk {
-                samples: samples.to_vec(),
+                samples: chunk,
                 sample_rate: spec.sample_rate,
             })
             .map_err(anyhow::Error::from)?;
@@ -520,10 +678,79 @@ fn signed_pcm_scale(bits_per_sample: u16) -> Result<f32> {
     Ok((1_i64 << (bits_per_sample - 1)) as f32)
 }
 
+enum RecognizerCommand {
+    Start(u64),
+    Push(awaz_core::AudioChunk),
+    Poll(u64),
+    Finish(u64, Arc<AtomicBool>),
+    Cancel(u64),
+    SetKeyterms(Vec<String>),
+    SetContext(String),
+    Shutdown,
+}
+
+enum RecognizerResponse {
+    Started(u64, std::result::Result<(), RecognizerError>),
+    Speech(u64, std::result::Result<Vec<SpeechEvent>, RecognizerError>),
+    Finished(u64, std::result::Result<Vec<SpeechEvent>, RecognizerError>),
+    Cancelled(u64, std::result::Result<(), RecognizerError>),
+    Configured(std::result::Result<(), RecognizerError>),
+    Fault(RecognizerError),
+}
+
+struct ServeSession {
+    state: VoiceState,
+    utterance: u64,
+    cancelled: HashSet<u64>,
+    cancel_token: Arc<AtomicBool>,
+    poll_pending: bool,
+    preroll: VecDeque<f32>,
+    worker_dropped: u64,
+    dropped_at_start: u64,
+}
+
+fn recognizer_worker(
+    mut recognizer: Box<dyn Recognizer>,
+    commands: Receiver<RecognizerCommand>,
+    responses: Sender<RecognizerResponse>,
+) {
+    while let Ok(command) = commands.recv() {
+        let response = match command {
+            RecognizerCommand::Start(id) => RecognizerResponse::Started(id, recognizer.start()),
+            RecognizerCommand::Push(chunk) => {
+                if let Err(error) = recognizer.push_audio(&chunk) {
+                    if responses.send(RecognizerResponse::Fault(error)).is_err() {
+                        break;
+                    }
+                }
+                continue;
+            }
+            RecognizerCommand::Poll(id) => RecognizerResponse::Speech(id, recognizer.poll()),
+            RecognizerCommand::Finish(id, cancelled) => {
+                RecognizerResponse::Finished(id, recognizer.finish_cancellable(&cancelled))
+            }
+            RecognizerCommand::Cancel(id) => RecognizerResponse::Cancelled(id, recognizer.cancel()),
+            RecognizerCommand::SetKeyterms(terms) => {
+                RecognizerResponse::Configured(recognizer.set_keyterms(&terms))
+            }
+            RecognizerCommand::SetContext(text) => {
+                RecognizerResponse::Configured(recognizer.set_context(&text))
+            }
+            RecognizerCommand::Shutdown => {
+                let _ = recognizer.cancel();
+                break;
+            }
+        };
+        if responses.send(response).is_err() {
+            break;
+        }
+    }
+}
+
 fn serve(args: ServeArgs) -> Result<()> {
     let LoadedRecognizer {
         provider,
-        mut recognizer,
+        recognizer,
     } = load_recognizer(&args.common)?;
     let capture = AudioCapture::start(CaptureConfig {
         device_name: args.device,
@@ -531,11 +758,24 @@ fn serve(args: ServeArgs) -> Result<()> {
     })
     .map_err(anyhow::Error::from)?;
     let audio_rx = capture.receiver();
+    let audio_errors = capture.error_receiver();
     let command_rx = command_reader();
     let poll_tick = tick(Duration::from_millis(80));
+    let (recognizer_tx, worker_commands) = bounded(1024);
+    let (worker_responses, recognizer_rx) = bounded(16);
+    thread::spawn(move || recognizer_worker(recognizer, worker_commands, worker_responses));
+
     let preroll_capacity = ((capture.sample_rate as u64 * args.preroll_ms as u64) / 1000) as usize;
-    let mut preroll = VecDeque::<f32>::with_capacity(preroll_capacity.max(1));
-    let mut state = VoiceState::Idle;
+    let mut session = ServeSession {
+        state: VoiceState::Idle,
+        utterance: 0,
+        cancelled: HashSet::new(),
+        cancel_token: Arc::new(AtomicBool::new(false)),
+        poll_pending: false,
+        preroll: VecDeque::with_capacity(preroll_capacity.max(1)),
+        worker_dropped: 0,
+        dropped_at_start: 0,
+    };
 
     emit(&Event::Ready {
         version: env!("CARGO_PKG_VERSION").into(),
@@ -547,44 +787,158 @@ fn serve(args: ServeArgs) -> Result<()> {
     })?;
 
     loop {
-        select! {
+        select_biased! {
             recv(command_rx) -> command => {
                 let Ok(command) = command else {
+                    let _ = recognizer_tx.try_send(RecognizerCommand::Shutdown);
                     break;
                 };
                 match command {
                     Ok(command) => {
                         if handle_command(
                             command,
-                            &mut state,
-                            recognizer.as_mut(),
-                            &mut preroll,
+                            &mut session,
                             &audio_rx,
                             &capture,
+                            &recognizer_tx,
                         )? {
                             break;
                         }
                     }
-                    Err(message) => emit_error("bad_json", &message, state, false)?,
+                    Err(message) => emit_error("bad_json", &message, session.state, false)?,
                 }
+            }
+            recv(audio_errors) -> message => {
+                let message = message.unwrap_or_else(|_| "audio error channel closed".into());
+                emit_error("audio_error", &message, session.state, true)?;
+                let _ = recognizer_tx.try_send(RecognizerCommand::Shutdown);
+                return Err(anyhow!("audio input failed: {message}"));
             }
             recv(audio_rx) -> message => {
                 let Ok(chunk) = message else {
-                    break;
+                    emit_error("audio_error", "audio input stopped", session.state, true)?;
+                    return Err(anyhow!("audio input stopped"));
                 };
-                if state == VoiceState::Listening {
-                    require_recognizer(recognizer.push_audio(&chunk), state)?;
+                if session.state == VoiceState::Listening {
+                    forward_audio(&recognizer_tx, chunk, &mut session.worker_dropped)?;
                 } else {
-                    retain_preroll(&mut preroll, preroll_capacity, chunk.samples);
+                    retain_preroll(&mut session.preroll, preroll_capacity, chunk.samples);
+                }
+            }
+            recv(recognizer_rx) -> response => {
+                let response = response.context("recognizer worker stopped")?;
+                match response {
+                    RecognizerResponse::Started(id, result) => {
+                        if let Err(error) = result {
+                            emit_error(
+                                "recognizer_error",
+                                &error.to_string(),
+                                session.state,
+                                true,
+                            )?;
+                            return Err(error.into());
+                        }
+                        if id == session.utterance
+                            && session.state == VoiceState::Listening
+                            && !session.cancelled.contains(&id)
+                        {
+                            emit(&Event::ListenStarted)?;
+                        }
+                    }
+                    RecognizerResponse::Speech(id, result) => {
+                        if id == session.utterance {
+                            session.poll_pending = false;
+                        }
+                        match result {
+                            Ok(events)
+                                if id == session.utterance
+                                    && session.state == VoiceState::Listening =>
+                            {
+                                for event in events {
+                                    emit_speech(event)?;
+                                }
+                            }
+                            Ok(_) => {}
+                            Err(error) => {
+                                emit_error(
+                                    "recognizer_error",
+                                    &error.to_string(),
+                                    session.state,
+                                    true,
+                                )?;
+                                return Err(error.into());
+                            }
+                        }
+                    }
+                    RecognizerResponse::Finished(id, result) => match result {
+                        Ok(_) if session.cancelled.contains(&id) => {}
+                        Ok(events)
+                            if id == session.utterance
+                                && session.state == VoiceState::Finalizing =>
+                        {
+                            session.poll_pending = false;
+                            emit_finalized(events)?;
+                            session.state.transition(VoiceState::Idle)?;
+                            warn_dropped_audio(
+                                &capture,
+                                session.worker_dropped,
+                                session.dropped_at_start,
+                            );
+                        }
+                        Ok(_) => {}
+                        Err(error) => {
+                            emit_error(
+                                "recognizer_error",
+                                &error.to_string(),
+                                session.state,
+                                true,
+                            )?;
+                            return Err(error.into());
+                        }
+                    },
+                    RecognizerResponse::Cancelled(id, result) => {
+                        if let Err(error) = result {
+                            emit_error(
+                                "recognizer_error",
+                                &error.to_string(),
+                                session.state,
+                                true,
+                            )?;
+                            return Err(error.into());
+                        }
+                        session.cancelled.remove(&id);
+                    }
+                    RecognizerResponse::Configured(result) => {
+                        if let Err(error) = result {
+                            emit_provider_error(&error, session.state)?;
+                        }
+                    }
+                    RecognizerResponse::Fault(error) => {
+                        emit_error(
+                            "recognizer_error",
+                            &error.to_string(),
+                            session.state,
+                            true,
+                        )?;
+                        return Err(error.into());
+                    }
                 }
             }
             recv(poll_tick) -> _ => {
-                if state == VoiceState::Listening {
-                    // Inference can take longer than one audio callback. Feed all
-                    // queued chunks before the next poll so recognition stays near live.
-                    feed_queued_audio(recognizer.as_mut(), &audio_rx, state)?;
-                    for event in require_recognizer(recognizer.poll(), state)? {
-                        emit_speech(event)?;
+                if session.state == VoiceState::Listening {
+                    drain_audio_to_worker(
+                        &audio_rx,
+                        &recognizer_tx,
+                        &mut session.worker_dropped,
+                    )?;
+                    if !session.poll_pending {
+                        match recognizer_tx.try_send(RecognizerCommand::Poll(session.utterance)) {
+                            Ok(()) => session.poll_pending = true,
+                            Err(TrySendError::Full(_)) => {}
+                            Err(TrySendError::Disconnected(_)) => {
+                                return Err(anyhow!("recognizer worker stopped"));
+                            }
+                        }
                     }
                 }
             }
@@ -628,11 +982,10 @@ fn command_reader() -> Receiver<std::result::Result<Command, String>> {
 
 fn handle_command(
     command: Command,
-    state: &mut VoiceState,
-    recognizer: &mut dyn Recognizer,
-    preroll: &mut VecDeque<f32>,
+    session: &mut ServeSession,
     audio_rx: &Receiver<awaz_core::AudioChunk>,
     capture: &AudioCapture,
+    recognizer_tx: &Sender<RecognizerCommand>,
 ) -> Result<bool> {
     match command {
         Command::Hello => emit(&Event::Capabilities {
@@ -640,62 +993,66 @@ fn handle_command(
             tts: false,
         })?,
         Command::ListenStart => {
-            if *state != VoiceState::Idle {
-                emit_error("invalid_state", "already busy", *state, false)?;
+            if session.state != VoiceState::Idle {
+                emit_error("invalid_state", "already busy", session.state, false)?;
                 return Ok(false);
             }
 
-            require_recognizer(recognizer.start(), *state)?;
-            state.transition(VoiceState::Listening)?;
-            if !preroll.is_empty() {
-                let samples = preroll.drain(..).collect();
-                require_recognizer(
-                    recognizer.push_audio(&awaz_core::AudioChunk {
+            session.utterance = session.utterance.wrapping_add(1);
+            session.cancel_token = Arc::new(AtomicBool::new(false));
+            session.dropped_at_start = capture
+                .dropped_chunks()
+                .saturating_add(session.worker_dropped);
+            recognizer_tx
+                .send(RecognizerCommand::Start(session.utterance))
+                .context("recognizer worker stopped")?;
+            session.state.transition(VoiceState::Listening)?;
+            if !session.preroll.is_empty() {
+                let samples = session.preroll.drain(..).collect();
+                forward_audio(
+                    recognizer_tx,
+                    awaz_core::AudioChunk {
                         samples,
                         sample_rate: capture.sample_rate,
-                    }),
-                    *state,
+                    },
+                    &mut session.worker_dropped,
                 )?;
             }
-            emit(&Event::ListenStarted)?;
         }
         Command::ListenStop => {
-            if *state != VoiceState::Listening {
-                emit_error("invalid_state", "not listening", *state, false)?;
+            if session.state != VoiceState::Listening {
+                emit_error("invalid_state", "not listening", session.state, false)?;
                 return Ok(false);
             }
 
-            state.transition(VoiceState::Finalizing)?;
-            drain_pending_audio(recognizer, audio_rx, *state)?;
-            for event in require_recognizer(recognizer.finish(), *state)? {
-                emit_speech(event)?;
-            }
-            state.transition(VoiceState::Idle)?;
-
-            let dropped = capture.dropped_chunks();
-            if dropped > 0 {
-                eprintln!("warning: dropped {dropped} audio chunks since start");
-            }
+            session.state.transition(VoiceState::Finalizing)?;
+            drain_audio_to_worker(audio_rx, recognizer_tx, &mut session.worker_dropped)?;
+            recognizer_tx
+                .send(RecognizerCommand::Finish(
+                    session.utterance,
+                    Arc::clone(&session.cancel_token),
+                ))
+                .context("recognizer worker stopped")?;
         }
         Command::ListenCancel => {
-            if *state == VoiceState::Listening || *state == VoiceState::Finalizing {
-                require_recognizer(recognizer.cancel(), *state)?;
-                while audio_rx.try_recv().is_ok() {}
-                preroll.clear();
-                *state = VoiceState::Idle;
+            if session.state == VoiceState::Listening || session.state == VoiceState::Finalizing {
+                let id = session.utterance;
+                session.cancelled.insert(id);
+                session.cancel_token.store(true, Ordering::Release);
+                session.poll_pending = false;
+                session.state = VoiceState::Idle;
+                recognizer_tx
+                    .send(RecognizerCommand::Cancel(id))
+                    .context("recognizer worker stopped")?;
             }
             emit(&Event::ListenCancelled)?;
         }
-        Command::KeytermsSet { terms } => {
-            if let Err(error) = recognizer.set_keyterms(&terms) {
-                emit_error("recognizer_error", &error.to_string(), *state, false)?;
-            }
-        }
-        Command::ContextSet { text } => {
-            if let Err(error) = recognizer.set_context(&text) {
-                emit_error("recognizer_error", &error.to_string(), *state, false)?;
-            }
-        }
+        Command::KeytermsSet { terms } => recognizer_tx
+            .send(RecognizerCommand::SetKeyterms(terms))
+            .context("recognizer worker stopped")?,
+        Command::ContextSet { text } => recognizer_tx
+            .send(RecognizerCommand::SetContext(text))
+            .context("recognizer worker stopped")?,
         Command::SpeakStart
         | Command::SpeakText { .. }
         | Command::SpeakEnd
@@ -703,14 +1060,12 @@ fn handle_command(
             emit_error(
                 "unsupported",
                 "TTS is reserved by the protocol but not implemented in Awaz v1",
-                *state,
+                session.state,
                 false,
             )?;
         }
         Command::Shutdown => {
-            if *state == VoiceState::Listening || *state == VoiceState::Finalizing {
-                let _ = recognizer.cancel();
-            }
+            let _ = recognizer_tx.try_send(RecognizerCommand::Shutdown);
             emit(&Event::Shutdown)?;
             return Ok(true);
         }
@@ -718,30 +1073,61 @@ fn handle_command(
     Ok(false)
 }
 
-fn drain_pending_audio(
-    recognizer: &mut dyn Recognizer,
-    audio_rx: &Receiver<awaz_core::AudioChunk>,
-    state: VoiceState,
+fn forward_audio(
+    recognizer_tx: &Sender<RecognizerCommand>,
+    chunk: awaz_core::AudioChunk,
+    worker_dropped: &mut u64,
 ) -> Result<()> {
-    while let Ok(chunk) = audio_rx.try_recv() {
-        require_recognizer(recognizer.push_audio(&chunk), state)?;
+    match recognizer_tx.try_send(RecognizerCommand::Push(chunk)) {
+        Ok(()) => Ok(()),
+        Err(TrySendError::Full(_)) => {
+            *worker_dropped += 1;
+            Ok(())
+        }
+        Err(TrySendError::Disconnected(_)) => Err(anyhow!("recognizer worker stopped")),
     }
-    Ok(())
 }
 
-fn feed_queued_audio(
-    recognizer: &mut dyn Recognizer,
+fn drain_audio_to_worker(
     audio_rx: &Receiver<awaz_core::AudioChunk>,
-    state: VoiceState,
+    recognizer_tx: &Sender<RecognizerCommand>,
+    worker_dropped: &mut u64,
 ) -> Result<()> {
     // Use a snapshot so a live producer cannot keep this loop from reaching inference.
     for _ in 0..audio_rx.len() {
         let Ok(chunk) = audio_rx.try_recv() else {
             break;
         };
-        require_recognizer(recognizer.push_audio(&chunk), state)?;
+        forward_audio(recognizer_tx, chunk, worker_dropped)?;
     }
     Ok(())
+}
+
+fn warn_dropped_audio(capture: &AudioCapture, worker_dropped: u64, baseline: u64) {
+    let total = capture.dropped_chunks().saturating_add(worker_dropped);
+    let dropped = total.saturating_sub(baseline);
+    if dropped > 0 {
+        eprintln!("warning: dropped {dropped} audio chunks during the utterance");
+    }
+}
+
+fn emit_finalized(events: Vec<SpeechEvent>) -> Result<()> {
+    let mut final_text = String::new();
+    for event in events {
+        match event {
+            SpeechEvent::Partial(text) => emit(&Event::TranscriptPartial { text })?,
+            SpeechEvent::Final(text) => final_text = text,
+        }
+    }
+    emit(&Event::TranscriptFinal { text: final_text })
+}
+
+fn emit_provider_error(error: &RecognizerError, state: VoiceState) -> Result<()> {
+    let code = match error {
+        RecognizerError::Unsupported(_) => "unsupported",
+        _ => "recognizer_error",
+    };
+    emit_error(code, &error.to_string(), state, false)
 }
 
 fn emit_speech(event: SpeechEvent) -> Result<()> {
@@ -769,19 +1155,6 @@ fn emit_error(code: &str, message: &str, state: VoiceState, fatal: bool) -> Resu
     })
 }
 
-fn require_recognizer<T>(
-    result: std::result::Result<T, RecognizerError>,
-    state: VoiceState,
-) -> Result<T> {
-    match result {
-        Ok(value) => Ok(value),
-        Err(error) => {
-            emit_error("recognizer_error", &error.to_string(), state, true)?;
-            Err(error.into())
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -798,6 +1171,115 @@ mod tests {
         let mut preroll = VecDeque::new();
         retain_preroll(&mut preroll, 3, vec![1.0, 2.0, 3.0, 4.0]);
         assert_eq!(preroll.into_iter().collect::<Vec<_>>(), vec![2.0, 3.0, 4.0]);
+    }
+
+    #[test]
+    fn manifest_rejects_paths_outside_the_model_directory() {
+        let manifest = serde_json::json!({
+            "groups": [{"files": [{"name": "../escape", "url": "https://example.invalid"}]}]
+        });
+        assert!(manifest_files(&manifest).is_err());
+    }
+
+    #[test]
+    fn manifest_requires_at_least_one_file() {
+        let manifest = serde_json::json!({"groups": []});
+        assert!(manifest_files(&manifest).is_err());
+    }
+
+    #[test]
+    fn model_file_completion_checks_the_declared_size() {
+        let root = std::env::temp_dir().join(format!(
+            "awaz-model-test-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("model.bin"), b"1234").unwrap();
+        let mut file = ModelFile {
+            name: "model.bin".into(),
+            url: "https://example.invalid".into(),
+            size: Some(4),
+        };
+        assert!(model_file_complete(&root, &file));
+        file.size = Some(5);
+        assert!(!model_file_complete(&root, &file));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    struct FakeRecognizer {
+        actions: std::sync::Arc<std::sync::Mutex<Vec<&'static str>>>,
+    }
+
+    impl Recognizer for FakeRecognizer {
+        fn start(&mut self) -> std::result::Result<(), RecognizerError> {
+            self.actions.lock().unwrap().push("start");
+            Ok(())
+        }
+
+        fn push_audio(
+            &mut self,
+            _chunk: &awaz_core::AudioChunk,
+        ) -> std::result::Result<(), RecognizerError> {
+            self.actions.lock().unwrap().push("audio");
+            Ok(())
+        }
+
+        fn poll(&mut self) -> std::result::Result<Vec<SpeechEvent>, RecognizerError> {
+            Ok(Vec::new())
+        }
+
+        fn finish(&mut self) -> std::result::Result<Vec<SpeechEvent>, RecognizerError> {
+            self.actions.lock().unwrap().push("finish");
+            Ok(vec![SpeechEvent::Final("done".into())])
+        }
+
+        fn cancel(&mut self) -> std::result::Result<(), RecognizerError> {
+            self.actions.lock().unwrap().push("cancel");
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn recognizer_worker_preserves_finish_then_cancel_order() {
+        let actions = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let recognizer = Box::new(FakeRecognizer {
+            actions: actions.clone(),
+        });
+        let (command_tx, command_rx) = bounded(8);
+        let (response_tx, response_rx) = bounded(8);
+        let worker = thread::spawn(move || recognizer_worker(recognizer, command_rx, response_tx));
+
+        command_tx.send(RecognizerCommand::Start(7)).unwrap();
+        command_tx
+            .send(RecognizerCommand::Finish(
+                7,
+                Arc::new(AtomicBool::new(false)),
+            ))
+            .unwrap();
+        command_tx.send(RecognizerCommand::Cancel(7)).unwrap();
+        command_tx.send(RecognizerCommand::Shutdown).unwrap();
+
+        assert!(matches!(
+            response_rx.recv().unwrap(),
+            RecognizerResponse::Started(7, Ok(()))
+        ));
+        assert!(matches!(
+            response_rx.recv().unwrap(),
+            RecognizerResponse::Finished(7, Ok(_))
+        ));
+        assert!(matches!(
+            response_rx.recv().unwrap(),
+            RecognizerResponse::Cancelled(7, Ok(()))
+        ));
+        worker.join().unwrap();
+        assert_eq!(
+            actions.lock().unwrap().as_slice(),
+            &["start", "finish", "cancel", "cancel"]
+        );
     }
 
     #[test]

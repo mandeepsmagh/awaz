@@ -46,6 +46,7 @@ impl Default for CaptureConfig {
 pub struct AudioCapture {
     _stream: cpal::Stream,
     receiver: Receiver<AudioChunk>,
+    errors: Receiver<String>,
     dropped_chunks: Arc<AtomicU64>,
     pub device_name: String,
     pub sample_rate: u32,
@@ -71,12 +72,14 @@ impl AudioCapture {
         let channels = supported.channels() as usize;
         let stream_config: cpal::StreamConfig = supported.into();
         let (sender, receiver) = bounded(config.queue_capacity.max(4));
+        let (error_sender, errors) = bounded(4);
         let dropped_chunks = Arc::new(AtomicU64::new(0));
 
         macro_rules! build_stream {
             ($ty:ty) => {{
                 let sender = sender.clone();
                 let dropped = dropped_chunks.clone();
+                let error_sender = error_sender.clone();
                 device.build_input_stream(
                     stream_config,
                     move |data: &[$ty], _| {
@@ -88,7 +91,9 @@ impl AudioCapture {
                             dropped.fetch_add(1, Ordering::Relaxed);
                         }
                     },
-                    move |err| eprintln!("awaz audio stream error: {err}"),
+                    move |err| {
+                        let _ = error_sender.try_send(err.to_string());
+                    },
                     None,
                 )
             }};
@@ -118,6 +123,7 @@ impl AudioCapture {
         Ok(Self {
             _stream: stream,
             receiver,
+            errors,
             dropped_chunks,
             device_name,
             sample_rate,
@@ -126,6 +132,10 @@ impl AudioCapture {
 
     pub fn receiver(&self) -> Receiver<AudioChunk> {
         self.receiver.clone()
+    }
+
+    pub fn error_receiver(&self) -> Receiver<String> {
+        self.errors.clone()
     }
 
     pub fn dropped_chunks(&self) -> u64 {

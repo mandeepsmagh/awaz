@@ -2,6 +2,19 @@
 
 All notable changes to Awaz are documented here.
 
+## Unreleased
+
+- Repair interrupted model caches and serialize concurrent model downloads.
+- Validate downloaded file sizes before installation.
+- Stream WAV samples with bounded memory.
+- Move recognition to a bounded worker so protocol control remains responsive.
+- Isolate audio captured during finalization from the completed utterance.
+- Suppress results from cancelled utterances and permit an immediate new start.
+- Report runtime audio failures through the protocol.
+- Return `unsupported` for provider customization that is not implemented.
+- Add timeouts and forced cleanup for the Apple Speech helper.
+- Report dropped audio per utterance and keep ANSI output on terminals only.
+
 ## 0.3.0 - Apple Speech provider
 
 - Add `--provider moonshine|apple` and `AWAZ_PROVIDER`.

@@ -53,7 +53,7 @@ Stops/finalizes the utterance and always emits exactly one final transcript even
 {"type":"listen.cancel"}
 ```
 
-Discards the current utterance and returns to idle.
+Discards the current utterance and returns to idle immediately. Awaz suppresses any pending final result from that utterance. A new `listen.start` can be sent after `listen.cancelled`.
 
 ```json
 {"type":"listen.cancelled"}
@@ -65,7 +65,7 @@ Discards the current utterance and returns to idle.
 {"type":"keyterms.set","terms":["Svelte","TypeScript","Kubernetes"]}
 ```
 
-Provider-neutral request to bias recognition toward exact domain vocabulary. The Moonshine provider applies it to streaming decoding. Moonshine key terms must not contain commas.
+Provider-neutral request to bias recognition toward exact domain vocabulary. The Moonshine provider applies it to streaming decoding. Moonshine key terms must not contain commas. A provider that does not implement key terms returns a nonfatal `unsupported` error.
 
 ### `context.set`
 
@@ -73,7 +73,7 @@ Provider-neutral request to bias recognition toward exact domain vocabulary. The
 {"type":"context.set","text":"This project uses Svelte, TypeScript, llama.cpp and Moonshine Voice."}
 ```
 
-Lets a provider derive likely key terms from a free-form passage.
+Lets a provider derive likely key terms from a free-form passage. A provider that does not implement context returns a nonfatal `unsupported` error.
 
 ### Reserved TTS commands
 
@@ -121,4 +121,4 @@ Errors remain protocol data:
 
 `state` is the authoritative Awaz state after the error. Integrations must synchronize to it. `fatal` means the recognizer cannot continue and the process will exit.
 
-Malformed input is reported as `bad_json` without terminating the process.
+Malformed input is reported as `bad_json` without terminating the process. A runtime microphone failure is reported as a fatal `audio_error`, then the process exits.

@@ -37,7 +37,7 @@ This is intentional:
 
 The CPAL callback may convert/downmix and enqueue audio, but it must never run neural inference, JSON serialization, filesystem work, or a blocking send.
 
-The queue is bounded. If consumers fall behind, Awaz counts dropped chunks rather than blocking the real-time capture callback.
+The queues are bounded. If consumers fall behind, Awaz counts dropped chunks rather than blocking the real-time capture callback. The protocol controller sends audio to a dedicated recognizer worker. Neural inference cannot block stdin commands or microphone queue draining.
 
 ## Pre-roll
 
@@ -51,7 +51,7 @@ The queue is bounded. If consumers fall behind, Awaz counts dropped chunks rathe
 start
 push_audio
 poll
-finish
+finish / cancellable finish
 cancel
 set_keyterms
 set_context
@@ -73,6 +73,10 @@ Idle → Listening → Finalizing → Idle
 
 `Speaking` exists only to preserve the duplex architecture. It is unreachable in v1.
 
+## Utterance boundaries
+
+The controller stops forwarding utterance audio when it accepts `listen.stop` or `listen.cancel`. Audio captured while the recognizer finalizes becomes bounded pre-roll for the next utterance. It never enters the utterance that is finalizing. Each worker command carries an utterance identity, so a cancelled final result cannot appear in a later utterance.
+
 ## Process model
 
 `awaz serve` is a companion process, not a system daemon.
@@ -91,7 +95,7 @@ Pi exits
 Awaz exits
 ```
 
-No port discovery, HTTP server, socket permissions, or stale background service is required.
+No port discovery, HTTP server, socket permissions, or stale background service is required. The controller remains responsive while the recognizer worker polls or finalizes. Cancellation immediately returns the public state to idle and suppresses pending events from the cancelled utterance. Providers can cooperatively interrupt a slow finalization. Apple Speech uses this path to cancel its asynchronous analyzer.
 
 ## Protocol rule
 
