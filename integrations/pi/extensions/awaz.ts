@@ -31,6 +31,7 @@ type VoiceState =
   | "starting"
   | "listening"
   | "finalizing"
+  | "cancelling"
   | "offline";
 
 export default function awazExtension(pi: ExtensionAPI) {
@@ -51,9 +52,11 @@ export default function awazExtension(pi: ExtensionAPI) {
             ? "🎤 listening"
             : next === "finalizing"
               ? "transcribing…"
-              : next === "booting"
-                ? "◌ voice starting"
-                : "🎤 voice off";
+              : next === "cancelling"
+                ? "cancelling…"
+                : next === "booting"
+                  ? "◌ voice starting"
+                  : "🎤 voice off";
     ctx.ui.setStatus("awaz", label);
   };
 
@@ -132,12 +135,15 @@ export default function awazExtension(pi: ExtensionAPI) {
           }
           break;
         case "listen.started":
-          setState("listening", sessionCtx);
+          if (state !== "cancelling") setState("listening", sessionCtx);
           break;
         case "transcript.partial":
-          sessionCtx.ui.setStatus("awaz", `🎤 ${event.text.slice(-42)}`);
+          if (state === "listening") {
+            sessionCtx.ui.setStatus("awaz", `🎤 ${event.text.slice(-42)}`);
+          }
           break;
         case "transcript.final":
+          if (state === "cancelling") break;
           if (event.text.trim()) {
             sessionCtx.ui.pasteToEditor(event.text.trim());
           }
@@ -186,6 +192,30 @@ export default function awazExtension(pi: ExtensionAPI) {
     });
   };
 
+  const requestCancel = (ctx: UiContext) => {
+    if (state === "booting") {
+      if (pendingListen) {
+        pendingListen = false;
+        ctx.ui.notify("Awaz pending recording cancelled.", "info");
+      } else {
+        ctx.ui.notify("Awaz is still loading the speech model.", "info");
+      }
+      return;
+    }
+    if (
+      state !== "starting" &&
+      state !== "listening" &&
+      state !== "finalizing"
+    ) {
+      return;
+    }
+    if (send({ type: "listen.cancel" })) {
+      setState("cancelling", ctx);
+    } else {
+      setState("offline", ctx);
+    }
+  };
+
   const toggle = (ctx: UiContext) => {
     if (state === "idle") {
       setState("starting", ctx);
@@ -199,8 +229,15 @@ export default function awazExtension(pi: ExtensionAPI) {
       return;
     }
 
-    if (state === "booting") {
-      ctx.ui.notify("Awaz is still loading the speech model.", "info");
+    if (state === "starting" || state === "finalizing") {
+      requestCancel(ctx);
+      return;
+    }
+
+    if (state === "cancelling") {
+      ctx.ui.notify("Awaz is cancelling the current recording.", "info");
+    } else if (state === "booting") {
+      requestCancel(ctx);
     } else if (state === "offline") {
       if (!activeSession) {
         ctx.ui.notify("Awaz is not available in this session.", "info");
@@ -230,9 +267,7 @@ export default function awazExtension(pi: ExtensionAPI) {
     handler: async (args, commandCtx) => {
       const arg = args?.trim();
       if (arg === "cancel") {
-        if (state === "listening" || state === "starting" || state === "finalizing") {
-          send({ type: "listen.cancel" });
-        }
+        requestCancel(commandCtx);
         return;
       }
       if (arg === "unload") {

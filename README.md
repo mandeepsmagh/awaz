@@ -170,8 +170,8 @@ pi install ./integrations/pi
 
 Then start Pi normally. The first `Alt+R` (or `/awaz`) starts Awaz lazily and begins listening once ready.
 
-- `Alt+R`: start/stop push-to-talk
-- `/awaz`: start/stop push-to-talk
+- `Alt+R`: start/stop push-to-talk; press again while starting or finalizing to cancel
+- `/awaz`: start/stop push-to-talk; run it again while starting or finalizing to cancel
 - `/awaz cancel`: discard the current utterance
 - `/awaz unload`: stop Awaz and free the loaded model
 

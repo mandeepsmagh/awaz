@@ -11,9 +11,11 @@ pi install ./integrations/pi
 ```
 
 Then start Pi normally. The first `Alt+R` (or `/awaz`) starts `awaz serve` and
-begins listening once ready. `/awaz cancel` discards a recording; `/awaz unload`
-stops the process and frees the model. Set `AWAZ_BIN`, `AWAZ_PROVIDER`,
-`AWAZ_LANGUAGE`, `AWAZ_MODEL`, `AWAZ_MODEL_DIR`, or `AWAZ_DEVICE` to override defaults.
+begins listening once ready. `Alt+R` stops an active recording. Press it again
+while Awaz starts or finalizes to cancel that recording. `/awaz cancel` provides
+the same cancellation; `/awaz unload` stops the process and frees the model. Set
+`AWAZ_BIN`, `AWAZ_PROVIDER`, `AWAZ_LANGUAGE`, `AWAZ_MODEL`, `AWAZ_MODEL_DIR`, or
+`AWAZ_DEVICE` to override defaults.
 `AWAZ_PROVIDER` accepts `moonshine` or `apple`; Apple requires macOS 26 or newer.
 `AWAZ_MODEL` accepts `tiny`, `small`, or `medium` (default `small`); the
 selected model downloads into `~/.cache/awaz` on first use.

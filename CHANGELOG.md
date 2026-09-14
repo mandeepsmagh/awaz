@@ -14,6 +14,7 @@ All notable changes to Awaz are documented here.
 - Return `unsupported` for provider customization that is not implemented.
 - Add timeouts and forced cleanup for the Apple Speech helper.
 - Report dropped audio per utterance and keep ANSI output on terminals only.
+- Let the Pi `Alt+R` shortcut cancel while recognition starts or finalizes.
 
 ## 0.3.0 - Apple Speech provider
 
