@@ -2,6 +2,14 @@
 
 All notable changes to Awaz are documented here.
 
+## Unreleased
+
+- Add the opt-in NeMo Speech provider through its native C ABI.
+- Add Nemotron 3.5 streaming recognition and Parakeet TDT v3 full-utterance recognition.
+- Download pinned NeMo GGUF models with size and SHA-256 verification.
+- Stage and package pinned NeMo Speech runtimes for all release targets.
+- Keep Moonshine as the default provider while provider benchmarks continue.
+
 ## 0.4.0 - CLI lifecycle hardening
 
 - Repair interrupted model caches and serialize concurrent model downloads.

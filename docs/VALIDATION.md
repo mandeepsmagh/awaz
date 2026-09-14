@@ -40,6 +40,10 @@ For the first real machine, validate in this order:
 6. `./target/release/awaz transcribe --provider apple tests/fixtures/jfk.wav` on macOS 26 or newer
 7. `./target/release/awaz serve` with `listen.start` / `listen.stop`
 8. install `integrations/pi` and verify Alt+R inserts, but does not submit, the final transcript
-9. repeat several utterances to confirm the model stays warm and no process is relaunched per turn
+9. `./target/release/awaz transcribe --provider nemo --nemo-model parakeet-tdt-v3 tests/fixtures/jfk.wav`
+10. `./target/release/awaz transcribe --provider nemo --nemo-model nemotron-3.5 tests/fixtures/jfk.wav`
+11. repeat several utterances to confirm the model stays warm and no process is relaunched per turn
+
+Record model load time, peak memory, audio duration, time to first partial, and stop-to-final latency. Compare transcript accuracy on the same saved WAV files. Do not select a default from the JFK fixture alone.
 
 Any failure in those checks should be fixed at its owning boundary (audio, provider, protocol, integration) rather than by adding another framework layer.

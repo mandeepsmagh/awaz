@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$ROOT/scripts/nemo-config.sh"
+DEST="$ROOT/vendor/nemo"
+BASE="https://github.com/NVIDIA/NeMo-Speech.cpp/releases/download/$NEMO_TAG"
+
+os="$(uname -s)"
+arch="$(uname -m)"
+case "$os/$arch" in
+  Linux/x86_64) asset="nemo-speech-$NEMO_VERSION-linux-x86_64-cpu.tar.gz" ;;
+  Linux/aarch64|Linux/arm64) asset="nemo-speech-$NEMO_VERSION-linux-aarch64-cpu.tar.gz" ;;
+  Darwin/arm64) asset="nemo-speech-$NEMO_VERSION-macos-aarch64-metal.tar.gz" ;;
+  Darwin/x86_64) echo "Awaz supports macOS 26 or newer on Apple Silicon only." >&2; exit 2 ;;
+  MINGW*/x86_64|MSYS*/x86_64|CYGWIN*/x86_64) asset="nemo-speech-$NEMO_VERSION-windows-x86_64-cpu.zip" ;;
+  *) echo "Unsupported platform for the prebuilt NeMo Speech runtime: $os/$arch" >&2; exit 2 ;;
+esac
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+curl -fL --retry 3 "$BASE/$asset" -o "$tmp/$asset"
+curl -fL --retry 3 "$BASE/$asset.sha256" -o "$tmp/$asset.sha256"
+expected="$(awk 'NR == 1 { print $1 }' "$tmp/$asset.sha256")"
+if command -v sha256sum >/dev/null 2>&1; then
+  actual="$(sha256sum "$tmp/$asset" | awk '{ print $1 }')"
+elif command -v shasum >/dev/null 2>&1; then
+  actual="$(shasum -a 256 "$tmp/$asset" | awk '{ print $1 }')"
+elif command -v certutil.exe >/dev/null 2>&1; then
+  actual="$(certutil.exe -hashfile "$(cygpath -w "$tmp/$asset")" SHA256 | tr -d ' \r' | awk 'NR == 2 { print }')"
+else
+  echo "No SHA-256 utility is available to verify $asset" >&2
+  exit 3
+fi
+actual="$(printf '%s' "$actual" | tr '[:upper:]' '[:lower:]')"
+expected="$(printf '%s' "$expected" | tr '[:upper:]' '[:lower:]')"
+if [[ "$actual" != "$expected" ]]; then
+  echo "NeMo Speech runtime checksum mismatch for $asset" >&2
+  exit 3
+fi
+
+tar -xf "$tmp/$asset" -C "$tmp"
+header="$(find "$tmp" -type f -path '*/include/nemo_speech/asr.h' | head -n1 || true)"
+if [[ -z "$header" ]]; then
+  echo "Could not locate the NeMo Speech SDK inside $asset" >&2
+  exit 3
+fi
+sdk_root="$(cd "$(dirname "$header")/../.." && pwd)"
+rm -rf "$DEST"
+mkdir -p "$DEST"
+cp -a "$sdk_root/include" "$sdk_root/lib" "$DEST/"
+[[ -d "$sdk_root/bin" ]] && cp -a "$sdk_root/bin" "$DEST/"
+mkdir -p "$DEST/share/nemo-speech" "$DEST/share/licenses"
+cp "$sdk_root/share/nemo-speech/model-index.json" "$DEST/share/nemo-speech/"
+cp -a "$sdk_root/share/licenses/nemo-speech" "$DEST/share/licenses/"
+
+echo "NeMo Speech runtime staged in $DEST"

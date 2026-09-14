@@ -13,13 +13,12 @@ Awaz owns audio and lifecycle. Speech engines are providers. Editors, agents, an
               /         \
       awaz-audio       provider contract
           │                  │
-         CPAL          speech providers
-          │             /           \
- PipeWire/CoreAudio  Moonshine    Apple Speech
-     /WASAPI          C ABI      Swift helper
-          │              │            │
-   mic / speaker   Moonshine/ONNX  macOS assets
-   mic / speaker
+         CPAL                speech providers
+          │             /          |          \
+ PipeWire/CoreAudio  Moonshine  Apple Speech  NeMo Speech
+     /WASAPI          C ABI    Swift helper     C ABI
+          │              │          │            │
+   mic / speaker   native model  macOS assets    GGUF
 ```
 
 ## Authoritative audio timeline
@@ -60,6 +59,8 @@ set_context
 Provider-specific concepts do not appear in protocol or integrations.
 
 Moonshine is implemented in `awaz-moonshine` through a small handwritten C ABI binding. This avoids `bindgen` and generated bindings. macOS builds link the Clang runtime required by the prebuilt Moonshine library.
+
+NeMo Speech is implemented in `awaz-nemo` through NVIDIA's stable native C ABI. Nemotron 3.5 uses a NeMo streaming recognition handle. Parakeet TDT v3 uses full-utterance recognition, so the provider buffers only that model's active utterance and emits no partial transcript. The provider never uses NeMo Speech's built-in microphone, CLI, or servers.
 
 Apple Speech is implemented in `awaz-apple-speech`. A small Swift helper adapts `SpeechAnalyzer` and `SpeechTranscriber` to the Rust contract. It receives PCM from Awaz through local pipes and never opens the microphone. macOS downloads and manages its language assets.
 
@@ -103,9 +104,9 @@ stdout is machine data only. stderr is diagnostics only. The stdio protocol is n
 
 ## Model/runtime packaging
 
-Source development stages only the pinned Moonshine runtime library for linking. Release archives bundle the native runtime beside `awaz` but ship no model weights. On first use `awaz` downloads the selected model into the user cache (`~/.cache/awaz`) using the manifest returned by the Moonshine library, so the file layout tracks the runtime version.
+Source development stages pinned Moonshine and NeMo Speech runtime libraries for linking. Release archives bundle the native runtimes beside `awaz` but ship no model weights. On first use, `awaz` downloads the selected model into the user cache (`~/.cache/awaz`). Moonshine supplies its own manifest. Awaz pins NeMo model revisions, sizes, and SHA-256 values from the SDK model index.
 
-The provider is still replaceable: packaged files and model fetching are an implementation detail of `awaz-moonshine`, not `awaz-core`.
+Provider packaging and model fetching do not appear in `awaz-core`.
 
 ## Cross-platform strategy
 

@@ -12,9 +12,20 @@ notices.
 - Bundled models: see [`moonshine.models`](moonshine.models).
 - Native API: Moonshine C API (`moonshine-c-api.h`), header version 30000.
 
-Awaz intentionally talks to Moonshine through a narrow provider boundary so a
-future recognizer can replace it without changing the audio core, CLI protocol,
-or integrations.
+Awaz talks to Moonshine through a narrow provider boundary so another recognizer can be selected without changing the audio core, CLI protocol, or integrations.
+
+## NeMo Speech
+
+Awaz can bundle the NeMo-Speech.cpp native SDK from NVIDIA. The source repository does not vendor it. Release packaging preserves its license, notice, third-party notices, and bundled dependency licenses.
+
+- Project: https://github.com/NVIDIA/NeMo-Speech.cpp
+- Runtime license: Apache-2.0.
+- Release version: see [`nemo.version`](nemo.version).
+- Native API: stable `nemo_speech/asr.h` C ABI v1.
+- Nemotron 3.5 license: NVIDIA Open Model License (OpenMDW 1.1).
+- Parakeet TDT 0.6B v3 license: CC-BY-4.0.
+
+Model weights are not part of Awaz release archives. Awaz downloads pinned GGUF artifacts from their NVIDIA Hugging Face repositories. Users remain responsible for the separate model terms.
 
 ## Speech test fixture
 

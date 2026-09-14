@@ -1,5 +1,6 @@
 /target/
 /dist/
 /vendor/moonshine/
+/vendor/nemo/
 .DS_Store
 *.swp

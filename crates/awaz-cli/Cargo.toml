@@ -16,7 +16,9 @@ awaz-apple-speech = { path = "../awaz-apple-speech" }
 awaz-audio = { path = "../awaz-audio" }
 awaz-core = { path = "../awaz-core" }
 awaz-moonshine = { path = "../awaz-moonshine" }
+awaz-nemo = { path = "../awaz-nemo" }
 clap.workspace = true
 crossbeam-channel.workspace = true
 hound.workspace = true
 serde_json.workspace = true
+sha2.workspace = true

@@ -13,7 +13,7 @@ awaz-core
    ↓
 SpeechRecognizer
    ↓
-awaz-moonshine  ← replaceable provider
+Moonshine / Apple Speech / NeMo Speech
    ↓
 transcript events
    ├── CLI
@@ -39,10 +39,11 @@ transcript events
 - 450 ms configurable pre-roll in machine/agent mode.
 - Moonshine streaming STT through its documented C ABI.
 - Apple Speech streaming STT through a provider-local Swift helper on macOS 26+.
-- `--provider moonshine|apple` selection; Moonshine remains the portable default.
+- NeMo Speech through its native C ABI, with Nemotron 3.5 and Parakeet TDT v3.
+- `--provider moonshine|apple|nemo` selection; Moonshine remains the portable default.
 - Runtime key-term and free-form context biasing.
 - `awaz mic` push-to-talk CLI.
-- `awaz transcribe FILE.wav` for bounded-memory mono WAV input.
+- `awaz transcribe FILE.wav` with streaming WAV input; offline-only models buffer the utterance.
 - On-demand model download on first use, cached under `~/.cache/awaz`.
 - `--save-wav` capture dump and dropped-audio-chunk warnings for debugging.
 - `awaz devices` and `awaz doctor`.
@@ -76,11 +77,11 @@ awaz mic
 pi install .\awaz\integrations\pi
 ```
 
-Do not copy only the executable. Awaz ships its platform library in the extracted directory, but speech models are **not** bundled: the first time you select a model, Awaz downloads it into your user cache (`~/.cache/awaz` on Linux and macOS, `%LOCALAPPDATA%\awaz` on Windows) and reuses it from then on. The first run therefore needs a network connection and `curl`. Release archives do not require Rust, Python, or uv. macOS may request microphone permission on the first run. The current macOS and Windows archives are unsigned, so the operating system can require manual approval.
+Do not copy only the executable. Awaz ships platform libraries in the extracted directory, but speech models are **not** bundled: the first time you select a model, Awaz downloads it into your user cache (`~/.cache/awaz` on Linux and macOS, `%LOCALAPPDATA%\awaz` on Windows) and reuses it from then on. The first run therefore needs a network connection and `curl`. Release archives do not require Rust, Python, or uv. macOS may request microphone permission on the first run. The current macOS and Windows archives are unsigned, so the operating system can require manual approval.
 
 ## Quick start from source
 
-Prerequisites for a source build are Rust and native audio development libraries; macOS builds also require the Xcode command line tools. `curl` is needed only when Awaz downloads a speech model on first use. `scripts/dev-setup.sh` stages the Moonshine runtime library for linking; model files are fetched on demand by the binary, not by the build.
+Prerequisites for a source build are Rust and native audio development libraries; macOS builds also require the Xcode command line tools. `curl` is needed only when Awaz downloads a speech model on first use. `scripts/dev-setup.sh` stages the Moonshine and NeMo Speech runtime libraries for linking; model files are fetched on demand by the binary, not by the build.
 
 ### NixOS
 
@@ -111,12 +112,14 @@ awaz doctor
 awaz mic
 awaz mic --device "My Microphone"
 awaz mic --provider apple
+awaz mic --provider nemo
 awaz transcribe recording.wav
 awaz transcribe --provider apple recording.wav
+awaz transcribe --provider nemo --nemo-model parakeet-tdt-v3 recording.wav
 awaz serve
 ```
 
-Moonshine is the default provider. Select Apple Speech on macOS 26 or newer with `--provider apple` (or `AWAZ_PROVIDER=apple`). macOS manages and downloads Apple language assets on demand. `--model` and `--model-dir` apply only to Moonshine.
+Moonshine is the default provider. Select Apple Speech on macOS 26 or newer with `--provider apple`, or select NeMo Speech with `--provider nemo`. The `AWAZ_PROVIDER` variable accepts the same names. macOS manages Apple language assets. Awaz downloads Moonshine and NeMo models on demand.
 
 The first entry in `moonshine.models` is the default Moonshine model. English Small Streaming is the current default. Select a Moonshine model with `--model` (or `--language`); Awaz downloads that model on first use and caches it:
 
@@ -128,11 +131,20 @@ awaz serve --language es --model small
 
 Model files live under `~/.cache/awaz/models/moonshine/<language>/<size>-streaming/` (`%LOCALAPPDATA%\awaz\...` on Windows). Only published language and model pairs are available; the current Moonshine catalog does not publish Hindi or Punjabi STT models.
 
-For fully offline use, pre-stage a model directory and point at it:
+For fully offline Moonshine use, pre-stage a model directory and point at it:
 
 ```bash
 AWAZ_MODEL_DIR=/path/to/model awaz mic
 ```
+
+NeMo Speech uses Nemotron 3.5 by default because it supports streaming and file transcription. Select Parakeet TDT v3 for fast full-utterance recognition:
+
+```bash
+awaz transcribe --provider nemo --nemo-model parakeet-tdt-v3 recording.wav
+awaz mic --provider nemo --nemo-model parakeet-tdt-v3
+```
+
+Parakeet TDT v3 buffers an utterance and returns text only after stop. It does not provide partial transcripts or cooperative cancellation during inference. Its Q8 model is approximately 681 MiB. Nemotron 3.5 streams partial results and supports key-term biasing. Its Q8 model is approximately 707 MiB. Use `--nemo-model-path` or `AWAZ_NEMO_MODEL_PATH` to select a pre-staged GGUF file.
 
 To dump the audio a `mic` session actually captured, add `--save-wav utter.wav` (or `AWAZ_SAVE_WAV`), then replay it with `awaz transcribe utter.wav`.
 
@@ -181,24 +193,32 @@ Environment overrides (read once per session, when Awaz starts):
 
 ```text
 AWAZ_BIN       path to the awaz binary (default: awaz on PATH)
-AWAZ_PROVIDER  moonshine | apple (default: moonshine)
-AWAZ_LANGUAGE  language code (default: en)
-AWAZ_MODEL     tiny | small | medium (default: small)
-AWAZ_MODEL_DIR use a pre-staged model directory instead of the cache
+AWAZ_PROVIDER        moonshine | apple | nemo (default: moonshine)
+AWAZ_LANGUAGE        language code (provider default when unset)
+AWAZ_MODEL           tiny | small | medium (Moonshine only)
+AWAZ_MODEL_DIR       pre-staged Moonshine model directory
+AWAZ_NEMO_MODEL      nemotron-3.5 | parakeet-tdt-v3
+AWAZ_NEMO_MODEL_PATH pre-staged NeMo Speech GGUF
 AWAZ_DEVICE    microphone device name (see awaz devices)
 ```
 
 ## Source versus release packaging
 
-A source checkout intentionally does **not** commit Moonshine binaries or model weights. `scripts/dev-setup.sh` stages the runtime library for linking; the binary downloads model weights on first use.
+A source checkout intentionally does **not** commit native provider binaries or model weights. `scripts/dev-setup.sh` stages the Moonshine and NeMo Speech runtime libraries for linking. The binary downloads model weights on first use.
 
-The release workflow stages the Moonshine runtime library beside the `awaz` binary but ships **no** model weights, keeping the archive small. At runtime Awaz resolves a model directory in this order:
+The release workflow stages the Moonshine and NeMo Speech runtime libraries beside the `awaz` binary but ships **no** model weights. At runtime, Moonshine resolves a model directory in this order:
 
 1. `--model-dir` / `AWAZ_MODEL_DIR`
 2. a `models/moonshine/<language>/<model>` directory beside the executable
 3. the user cache directory
 
-If none exists, Awaz downloads the selected model into the cache using the manifest returned by the Moonshine library itself, so the file layout stays in sync with the runtime version. Awaz validates the declared file sizes and repairs an interrupted cache on the next run.
+NeMo Speech resolves a GGUF in this order:
+
+1. `--nemo-model-path` / `AWAZ_NEMO_MODEL_PATH`
+2. `models/nemo/<model>/<filename>` beside the executable
+3. the user cache directory
+
+Awaz uses the Moonshine library manifest for Moonshine files. It uses pinned SDK index metadata for NeMo files. Downloads use a lock and temporary file. NeMo downloads also verify SHA-256 before installation.
 
 ## Platform status
 
@@ -206,10 +226,10 @@ Target architecture:
 
 | Platform | Audio | Provider | Intended status |
 |---|---|---|---|
-| NixOS / Linux x86_64 | CPAL → PipeWire/ALSA | Moonshine native | first-class |
-| Linux arm64 | CPAL → PipeWire/ALSA | Moonshine native | release target |
-| macOS 26+ on Apple Silicon | CPAL → CoreAudio | Moonshine or Apple Speech | first-class |
-| Windows x86_64 | CPAL → WASAPI | Moonshine native | portable / CI target |
+| NixOS / Linux x86_64 | CPAL → PipeWire/ALSA | Moonshine or NeMo Speech | first-class |
+| Linux arm64 | CPAL → PipeWire/ALSA | Moonshine or NeMo Speech | release target |
+| macOS 26+ on Apple Silicon | CPAL → CoreAudio | Moonshine, Apple Speech, or NeMo Speech | first-class |
+| Windows x86_64 | CPAL → WASAPI | Moonshine or NeMo Speech | portable / CI target |
 | Windows arm64 | CPAL → WASAPI | provider-dependent | future release target |
 
 Real microphone behavior still needs validation on physical hardware for each platform; CI can fully exercise protocol/state logic and file/fixture transcription, but hosted runners do not substitute for device testing.
@@ -243,4 +263,4 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and [`docs/VALIDATION.md`](do
 
 ## License
 
-Awaz is MIT licensed. Moonshine Voice and its model licensing are separate; see [`THIRD_PARTY.md`](THIRD_PARTY.md).
+Awaz is MIT licensed. Provider runtimes and model licenses are separate; see [`THIRD_PARTY.md`](THIRD_PARTY.md).

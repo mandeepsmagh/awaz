@@ -3,12 +3,14 @@ use awaz_apple_speech::AppleSpeechRecognizer;
 use awaz_audio::{AudioCapture, CaptureConfig, list_input_devices};
 use awaz_core::{Command, Event, Recognizer, RecognizerError, SpeechEvent, VoiceState};
 use awaz_moonshine::{ModelSize, MoonshineRecognizer, default_model_dir};
+use awaz_nemo::{NemoModel, NemoRecognizer, default_model_path as default_nemo_model_path};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use crossbeam_channel::{Receiver, Sender, TrySendError, bounded, select, select_biased, tick};
+use sha2::{Digest, Sha256};
 use std::{
     collections::{HashSet, VecDeque},
-    fs::OpenOptions,
-    io::{self, BufRead, IsTerminal, Write},
+    fs::{File, OpenOptions},
+    io::{self, BufRead, BufReader, IsTerminal, Read, Write},
     path::{Component, Path, PathBuf},
     sync::{
         Arc,
@@ -50,6 +52,7 @@ enum ProviderArg {
     #[default]
     Moonshine,
     Apple,
+    Nemo,
 }
 
 impl ProviderArg {
@@ -57,6 +60,7 @@ impl ProviderArg {
         match self {
             Self::Moonshine => "moonshine",
             Self::Apple => "apple",
+            Self::Nemo => "nemo",
         }
     }
 }
@@ -74,6 +78,24 @@ impl From<ModelArg> for ModelSize {
             ModelArg::Tiny => Self::Tiny,
             ModelArg::Small => Self::Small,
             ModelArg::Medium => Self::Medium,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, ValueEnum)]
+enum NemoModelArg {
+    #[default]
+    #[value(name = "nemotron-3.5")]
+    Nemotron35,
+    #[value(name = "parakeet-tdt-v3")]
+    ParakeetTdtV3,
+}
+
+impl From<NemoModelArg> for NemoModel {
+    fn from(value: NemoModelArg) -> Self {
+        match value {
+            NemoModelArg::Nemotron35 => Self::Nemotron35,
+            NemoModelArg::ParakeetTdtV3 => Self::ParakeetTdtV3,
         }
     }
 }
@@ -103,6 +125,19 @@ struct CommonArgs {
         help = "Use a pre-staged Moonshine model directory instead of the cache"
     )]
     model_dir: Option<PathBuf>,
+    #[arg(
+        long,
+        value_enum,
+        env = "AWAZ_NEMO_MODEL",
+        help = "NeMo Speech model; downloaded on first use"
+    )]
+    nemo_model: Option<NemoModelArg>,
+    #[arg(
+        long,
+        env = "AWAZ_NEMO_MODEL_PATH",
+        help = "Use a pre-staged NeMo Speech GGUF instead of the cache"
+    )]
+    nemo_model_path: Option<PathBuf>,
 }
 
 #[derive(Args)]
@@ -219,6 +254,32 @@ fn model_path(common: &CommonArgs) -> Result<(String, PathBuf, ModelSize)> {
     Ok((language, path, size))
 }
 
+fn nemo_model_path(common: &CommonArgs, model: NemoModel) -> Result<PathBuf> {
+    if let Some(path) = &common.nemo_model_path {
+        if !path.is_file() {
+            return Err(anyhow!("NeMo Speech model not found at {}", path.display()));
+        }
+        return Ok(path.clone());
+    }
+
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(root) = exe.parent()
+    {
+        let bundled = root
+            .join("models/nemo")
+            .join(model.slug())
+            .join(model.filename());
+        if bundled.is_file() {
+            return Ok(bundled);
+        }
+    }
+
+    let path = default_nemo_model_path(model)
+        .ok_or_else(|| anyhow!("cannot determine NeMo model path; pass --nemo-model-path"))?;
+    ensure_nemo_model(model, &path)?;
+    Ok(path)
+}
+
 struct LoadedRecognizer {
     provider: &'static str,
     recognizer: Box<dyn Recognizer>,
@@ -227,6 +288,11 @@ struct LoadedRecognizer {
 fn load_recognizer(common: &CommonArgs) -> Result<LoadedRecognizer> {
     let recognizer: Box<dyn Recognizer> = match common.provider {
         ProviderArg::Moonshine => {
+            if common.nemo_model.is_some() || common.nemo_model_path.is_some() {
+                return Err(anyhow!(
+                    "--nemo-model and --nemo-model-path apply only to the NeMo provider"
+                ));
+            }
             let (language, path, size) = model_path(common)?;
             if common.model_dir.is_some() {
                 if !path.is_dir() {
@@ -238,13 +304,35 @@ fn load_recognizer(common: &CommonArgs) -> Result<LoadedRecognizer> {
             Box::new(MoonshineRecognizer::load(&path, size).map_err(anyhow::Error::from)?)
         }
         ProviderArg::Apple => {
-            if common.model.is_some() || common.model_dir.is_some() {
+            if common.model.is_some()
+                || common.model_dir.is_some()
+                || common.nemo_model.is_some()
+                || common.nemo_model_path.is_some()
+            {
                 return Err(anyhow!(
-                    "--model and --model-dir apply only to the Moonshine provider; Apple models are managed by macOS"
+                    "model options do not apply to Apple Speech; macOS manages its models"
                 ));
             }
             let language = common.language.as_deref().unwrap_or("en");
             Box::new(AppleSpeechRecognizer::load(language).map_err(anyhow::Error::from)?)
+        }
+        ProviderArg::Nemo => {
+            if common.model.is_some() || common.model_dir.is_some() {
+                return Err(anyhow!(
+                    "--model and --model-dir apply only to the Moonshine provider"
+                ));
+            }
+            let model = common.nemo_model.unwrap_or_default().into();
+            let path = nemo_model_path(common, model)?;
+            let language = common
+                .language
+                .as_deref()
+                .unwrap_or(if model.supports_streaming() {
+                    "auto"
+                } else {
+                    ""
+                });
+            Box::new(NemoRecognizer::load(&path, model, language).map_err(anyhow::Error::from)?)
         }
     };
     Ok(LoadedRecognizer {
@@ -258,6 +346,7 @@ struct ModelFile {
     name: String,
     url: String,
     size: Option<u64>,
+    sha256: Option<String>,
 }
 
 struct DownloadLock(PathBuf);
@@ -266,6 +355,34 @@ impl Drop for DownloadLock {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.0);
     }
+}
+
+fn ensure_nemo_model(model: NemoModel, path: &Path) -> Result<()> {
+    let dest = path
+        .parent()
+        .context("NeMo model path has no parent directory")?;
+    let file = ModelFile {
+        name: model.filename().into(),
+        url: model.download_url(),
+        size: Some(model.size()),
+        sha256: Some(model.sha256().into()),
+    };
+    if model_file_complete(dest, &file) {
+        return Ok(());
+    }
+
+    std::fs::create_dir_all(dest)?;
+    let _lock = acquire_download_lock(dest)?;
+    if model_file_complete(dest, &file) {
+        return Ok(());
+    }
+
+    eprintln!("downloading NeMo Speech {} model…", model.slug());
+    download_model_file(dest, &file)?;
+    if !model_file_complete(dest, &file) {
+        return Err(anyhow!("NeMo Speech model download is incomplete"));
+    }
+    Ok(())
 }
 
 fn ensure_model(language: &str, size: ModelSize, dest: &Path) -> Result<()> {
@@ -328,6 +445,7 @@ fn manifest_files(manifest: &serde_json::Value) -> Result<Vec<ModelFile>> {
                     .context("manifest entry missing url")?
                     .to_owned(),
                 size: file.get("size").and_then(serde_json::Value::as_u64),
+                sha256: None,
             });
         }
     }
@@ -412,6 +530,16 @@ fn download_model_file(dest: &Path, file: &ModelFile) -> Result<()> {
                 .unwrap_or_else(|| "a non-empty file".into())
         ));
     }
+    if let Some(expected) = &file.sha256 {
+        let actual = file_sha256(&part)?;
+        if !actual.eq_ignore_ascii_case(expected) {
+            let _ = std::fs::remove_file(&part);
+            return Err(anyhow!(
+                "downloaded {} has SHA-256 {actual}, expected {expected}",
+                file.name
+            ));
+        }
+    }
 
     match std::fs::rename(&part, &target) {
         Ok(()) => Ok(()),
@@ -422,6 +550,21 @@ fn download_model_file(dest: &Path, file: &ModelFile) -> Result<()> {
         }
         Err(error) => Err(error).with_context(|| format!("finalize {}", file.name)),
     }
+}
+
+fn file_sha256(path: &Path) -> Result<String> {
+    let file = File::open(path).with_context(|| format!("open {} for checksum", path.display()))?;
+    let mut reader = BufReader::new(file);
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let count = reader.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        hasher.update(&buffer[..count]);
+    }
+    Ok(format!("{:x}", hasher.finalize()))
 }
 
 fn devices() -> Result<()> {
@@ -455,6 +598,11 @@ fn doctor(common: CommonArgs) -> Result<()> {
             eprintln!("  model              {} ({})", size.slug(), path.display());
         }
         ProviderArg::Apple => eprintln!("  model              managed by macOS"),
+        ProviderArg::Nemo => {
+            let model: NemoModel = common.nemo_model.unwrap_or_default().into();
+            let path = nemo_model_path(&common, model)?;
+            eprintln!("  model              {} ({})", model.slug(), path.display());
+        }
     }
 
     let loaded = load_recognizer(&common)?;
@@ -465,6 +613,10 @@ fn doctor(common: CommonArgs) -> Result<()> {
             MoonshineRecognizer::library_version()
         ),
         ProviderArg::Apple => eprintln!("  apple speech        ready"),
+        ProviderArg::Nemo => eprintln!(
+            "  nemo speech         ready (library {})",
+            NemoRecognizer::library_version()
+        ),
     }
     eprintln!("  status             ready");
     Ok(())
@@ -1203,6 +1355,7 @@ mod tests {
             name: "model.bin".into(),
             url: "https://example.invalid".into(),
             size: Some(4),
+            sha256: None,
         };
         assert!(model_file_complete(&root, &file));
         file.size = Some(5);
@@ -1299,5 +1452,38 @@ mod tests {
             panic!("expected transcribe command");
         };
         assert_eq!(args.common.provider, ProviderArg::Apple);
+    }
+
+    #[test]
+    fn nemo_provider_and_parakeet_are_selectable() {
+        let cli = Cli::try_parse_from([
+            "awaz",
+            "transcribe",
+            "--provider",
+            "nemo",
+            "--nemo-model",
+            "parakeet-tdt-v3",
+            "audio.wav",
+        ])
+        .unwrap();
+        let CliCommand::Transcribe(args) = cli.command else {
+            panic!("expected transcribe command");
+        };
+        assert_eq!(args.common.provider, ProviderArg::Nemo);
+        assert!(matches!(
+            args.common.nemo_model,
+            Some(NemoModelArg::ParakeetTdtV3)
+        ));
+    }
+
+    #[test]
+    fn sha256_matches_known_value() {
+        let path = std::env::temp_dir().join(format!("awaz-sha256-{}", std::process::id()));
+        std::fs::write(&path, b"abc").unwrap();
+        assert_eq!(
+            file_sha256(&path).unwrap(),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        std::fs::remove_file(path).unwrap();
     }
 }

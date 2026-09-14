@@ -27,18 +27,24 @@ jobs:
       - name: Linux audio dependencies
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y pkg-config libasound2-dev libpipewire-0.3-dev
-      - name: Stage Moonshine runtime
+      - name: Stage speech runtimes
         shell: bash
-        run: ./scripts/fetch-moonshine-runtime.sh
-      - name: Configure Moonshine runtime loader
+        run: |
+          ./scripts/fetch-moonshine-runtime.sh
+          ./scripts/fetch-nemo-runtime.sh
+      - name: Configure speech runtime loaders
         shell: bash
         run: |
           case "$RUNNER_OS" in
             Linux)
-              echo "LD_LIBRARY_PATH=$GITHUB_WORKSPACE/vendor/moonshine/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
+              echo "LD_LIBRARY_PATH=$GITHUB_WORKSPACE/vendor/moonshine/lib:$GITHUB_WORKSPACE/vendor/nemo/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
+              ;;
+            macOS)
+              echo "DYLD_LIBRARY_PATH=$GITHUB_WORKSPACE/vendor/nemo/lib${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}" >> "$GITHUB_ENV"
               ;;
             Windows)
               echo "$GITHUB_WORKSPACE/vendor/moonshine/lib" >> "$GITHUB_PATH"
+              echo "$GITHUB_WORKSPACE/vendor/nemo/bin" >> "$GITHUB_PATH"
               ;;
           esac
       - name: Format

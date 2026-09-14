@@ -1,6 +1,6 @@
 # Release matrix
 
-GitHub Actions publishes self-contained archives for the native Moonshine runtime targets Awaz can currently stage automatically:
+GitHub Actions publishes self-contained archives for the native Moonshine and NeMo Speech runtime targets Awaz can stage automatically:
 
 - Linux x86_64
 - Linux arm64
@@ -12,7 +12,7 @@ Each release archive contains:
 ```text
 awaz[.exe]
 awaz-apple-speech          # macOS only
-lib/                       # Linux native runtime; macOS is statically linked
+lib/                       # Linux and macOS dynamic provider libraries
 *.dll                      # Windows runtime DLLs live beside awaz.exe
 integrations/pi/
 docs/
@@ -20,8 +20,10 @@ README.md
 LICENSE
 moonshine.version
 moonshine.models
+nemo.version
 THIRD_PARTY.md
 THIRD_PARTY_LICENSES/MOONSHINE-v<version>-LICENSE
+THIRD_PARTY_LICENSES/NEMO-SPEECH-v<version>/
 ```
 
 ## Installation
@@ -36,6 +38,6 @@ The macOS and Windows archives are not signed. The operating system can require 
 
 Awaz does not support Intel macOS. Windows arm64 remains a future target.
 
-The root `moonshine.version` file selects the runtime and packaged license version. The first entry in `moonshine.models` is the default model; models are fetched on first use from the manifest the Moonshine library returns.
+The root `moonshine.version` and `nemo.version` files select the native runtime releases. The first entry in `moonshine.models` is the default Moonshine model. NeMo model revisions and checksums are pinned in `awaz-nemo` from the selected SDK model index.
 
 macOS signing/notarization and Windows Authenticode signing are separate distribution-hardening steps and require project-owned signing identities/secrets; the workflow is intentionally usable before those secrets exist.

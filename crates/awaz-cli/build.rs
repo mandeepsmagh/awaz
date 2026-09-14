@@ -1,12 +1,19 @@
-use std::env;
+use std::{env, path::PathBuf};
 
 fn main() {
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let nemo = root.join("vendor/nemo/lib");
+
     if target_os == "linux" {
-        // Release archives keep libmoonshine.so beside the binary in ./lib.
-        // Source builds stage it under ./vendor, which is two levels above
-        // target/{debug,release}/awaz. Keeping both paths makes direct source
-        // builds runnable without requiring users to manage LD_LIBRARY_PATH.
-        println!("cargo:rustc-link-arg=-Wl,-rpath,$ORIGIN/lib:$ORIGIN/../../vendor/moonshine/lib");
+        // Release archives keep provider libraries under ./lib. The absolute
+        // development path also lets Cargo run test binaries from target/deps.
+        println!(
+            "cargo:rustc-link-arg=-Wl,-rpath,$ORIGIN/lib:$ORIGIN/../../vendor/moonshine/lib:{}",
+            nemo.display()
+        );
+    } else if target_os == "macos" {
+        println!("cargo:rustc-link-arg=-Wl,-rpath,{}", nemo.display());
+        println!("cargo:rustc-link-arg=-Wl,-rpath,@executable_path/lib");
     }
 }
