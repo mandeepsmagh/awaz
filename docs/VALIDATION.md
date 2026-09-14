@@ -36,8 +36,10 @@ For the first real machine, validate in this order:
 2. `cargo build --release -p awaz-cli`
 3. `./target/release/awaz doctor`
 4. `./target/release/awaz mic`
-5. `./target/release/awaz serve` with `listen.start` / `listen.stop`
-6. install `integrations/pi` and verify Alt+R inserts, but does not submit, the final transcript
-7. repeat several utterances to confirm the model stays warm and no process is relaunched per turn
+5. `./target/release/awaz transcribe tests/fixtures/jfk.wav`
+6. `./target/release/awaz transcribe --provider apple tests/fixtures/jfk.wav` on macOS 26 or newer
+7. `./target/release/awaz serve` with `listen.start` / `listen.stop`
+8. install `integrations/pi` and verify Alt+R inserts, but does not submit, the final transcript
+9. repeat several utterances to confirm the model stays warm and no process is relaunched per turn
 
 Any failure in those checks should be fixed at its owning boundary (audio, provider, protocol, integration) rather than by adding another framework layer.

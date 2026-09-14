@@ -15,3 +15,9 @@ notices.
 Awaz intentionally talks to Moonshine through a narrow provider boundary so a
 future recognizer can replace it without changing the audio core, CLI protocol,
 or integrations.
+
+## Speech test fixture
+
+`tests/fixtures/jfk.wav` is the JFK sample distributed by `whisper.cpp`. It is
+used for local provider smoke tests and is not included in Awaz release archives.
+See `tests/fixtures/README.md` for its source and checksum.
