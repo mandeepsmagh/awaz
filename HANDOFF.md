@@ -4,17 +4,16 @@
 
 CLI reliability hardening is complete. The shared `tests/fixtures/jfk.wav` file provides a documented local smoke test for Moonshine and Apple Speech. Model downloads now repair partial caches, serialize concurrent writers, and validate file sizes before installation. File transcription uses bounded memory. `serve` uses a bounded recognizer worker, keeps protocol control responsive, isolates audio across utterances, suppresses cancelled results, and reports runtime audio failures. Unsupported provider customization is explicit. Apple helper operations have timeouts. Interactive microphone output does not write ANSI sequences to redirected streams.
 
-Moonshine and Apple Speech are working STT providers. Select them with `--provider moonshine|apple` or `AWAZ_PROVIDER`. Moonshine remains the portable default and downloads its selected model on demand. macOS downloads Apple language assets on demand. Apple file transcription is verified on macOS 26; microphone and packaged-release tests remain. The Pi integration forwards `AWAZ_PROVIDER`. Its `Alt+R` shortcut cancels a recording while Awaz starts or finalizes. The Moonshine live loop now polls on a fixed tick and feeds queued audio before inference, which prevents continuous capture or a slow poll from adding avoidable latency. Current release 0.3.0.
+Moonshine and Apple Speech are working STT providers. Select them with `--provider moonshine|apple` or `AWAZ_PROVIDER`. Moonshine remains the portable default and downloads its selected model on demand. macOS downloads Apple language assets on demand. Apple file transcription and the packaged macOS archive are verified on macOS 26; microphone tests remain. The Pi integration forwards `AWAZ_PROVIDER`. Its `Alt+R` shortcut cancels a recording while Awaz starts or finalizes. The Moonshine live loop now polls on a fixed tick and feeds queued audio before inference, which prevents continuous capture or a slow poll from adding avoidable latency. Current release 0.4.0.
 
 ## Next
 
 1. Verify Apple `mic` and `serve` on physical hardware.
-2. Smoke-test the packaged macOS archive and confirm the helper stays beside `awaz`.
-3. Re-verify Lenovo Moonshine dictation and the Pi lazy-start/unload flow.
-4. Add shared provider behavior checks before changing any platform default.
-5. Measure model load, live partial, and stop-to-final latency for each provider.
-6. Evaluate `parakeet-rs` as a later provider. Download model files on demand and expose only supported model names.
-7. Keep Moonshine available on every supported platform. Keep it as the default until measurements support a change.
+2. Re-verify Lenovo Moonshine dictation and the Pi lazy-start/unload flow.
+3. Add shared provider behavior checks before changing any platform default.
+4. Measure model load, live partial, and stop-to-final latency for each provider.
+5. Evaluate `parakeet-rs` as a later provider. Download model files on demand and expose only supported model names.
+6. Keep Moonshine available on every supported platform. Keep it as the default until measurements support a change.
 
 ## Parked: keyterm/context biasing
 

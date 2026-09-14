@@ -2,7 +2,7 @@
 
 All notable changes to Awaz are documented here.
 
-## Unreleased
+## 0.4.0 - CLI lifecycle hardening
 
 - Repair interrupted model caches and serialize concurrent model downloads.
 - Validate downloaded file sizes before installation.
