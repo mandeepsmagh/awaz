@@ -107,7 +107,7 @@ checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
 name = "awaz-apple-speech"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "awaz-core",
  "crossbeam-channel",
@@ -116,7 +116,7 @@ dependencies = [
 
 [[package]]
 name = "awaz-audio"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "awaz-core",
  "cpal",
@@ -126,7 +126,7 @@ dependencies = [
 
 [[package]]
 name = "awaz-cli"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "awaz-apple-speech",
@@ -143,7 +143,7 @@ dependencies = [
 
 [[package]]
 name = "awaz-core"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -152,7 +152,7 @@ dependencies = [
 
 [[package]]
 name = "awaz-moonshine"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "awaz-core",
  "directories",
@@ -160,7 +160,7 @@ dependencies = [
 
 [[package]]
 name = "awaz-nemo"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "awaz-core",
  "directories",
@@ -168,7 +168,7 @@ dependencies = [
 
 [[package]]
 name = "awaz-provider-conformance"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "awaz-apple-speech",
  "awaz-core",

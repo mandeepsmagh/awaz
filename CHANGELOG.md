@@ -2,7 +2,7 @@
 
 All notable changes to Awaz are documented here.
 
-## Unreleased
+## 0.5.1 - Provider conformance
 
 - Add a reusable recognizer lifecycle conformance suite with opt-in native provider tests.
 - Return an empty final result instead of timing out when Apple Speech finishes without audio.
