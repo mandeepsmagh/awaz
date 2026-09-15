@@ -2,6 +2,11 @@
 
 All notable changes to Awaz are documented here.
 
+## 0.5.1 - Release build compatibility
+
+- Keep bundled NeMo C++ runtime libraries out of build-time loader paths so the system libclang can load.
+- Expose only required NeMo ASR DLLs to Windows test executables.
+
 ## 0.5.0 - NeMo Speech provider
 
 - Add the opt-in NeMo Speech provider through its native C ABI.

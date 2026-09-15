@@ -32,7 +32,7 @@ Keep unsafe Rust in provider-specific FFI crates. Document the safety contract a
 
 ## CI
 
-Use current Node 24 action patch tags and GitHub's latest hosted runner aliases. Keep an explicit runner label when GitHub has no architecture-specific latest alias. The workflows stage the Moonshine and NeMo Speech runtimes; no Python or uv is involved. The release workflow packages no model weights, so model downloads happen on first use.
+Use current Node 24 action patch tags and GitHub's latest hosted runner aliases. Keep an explicit runner label when GitHub has no architecture-specific latest alias. The workflows stage the Moonshine and NeMo Speech runtimes; no Python or uv is involved. Do not put the full NeMo library directory in a build-time loader path. Its bundled C++ runtime can shadow the runner toolchain and prevent libclang from loading. Linux binaries use the SDK's relative runpath. Windows build jobs expose a filtered ASR DLL directory. The release workflow packages no model weights, so model downloads happen on first use.
 
 ## Checks
 

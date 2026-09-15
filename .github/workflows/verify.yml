@@ -37,14 +37,14 @@ jobs:
         run: |
           case "$RUNNER_OS" in
             Linux)
-              echo "LD_LIBRARY_PATH=$GITHUB_WORKSPACE/vendor/moonshine/lib:$GITHUB_WORKSPACE/vendor/nemo/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
+              echo "LD_LIBRARY_PATH=$GITHUB_WORKSPACE/vendor/moonshine/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
               ;;
             macOS)
               echo "DYLD_LIBRARY_PATH=$GITHUB_WORKSPACE/vendor/nemo/lib${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}" >> "$GITHUB_ENV"
               ;;
             Windows)
               echo "$GITHUB_WORKSPACE/vendor/moonshine/lib" >> "$GITHUB_PATH"
-              echo "$GITHUB_WORKSPACE/vendor/nemo/bin" >> "$GITHUB_PATH"
+              echo "$GITHUB_WORKSPACE/vendor/nemo/runtime" >> "$GITHUB_PATH"
               ;;
           esac
       - name: Format

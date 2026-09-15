@@ -50,6 +50,14 @@ rm -rf "$DEST"
 mkdir -p "$DEST"
 cp -a "$sdk_root/include" "$sdk_root/lib" "$DEST/"
 [[ -d "$sdk_root/bin" ]] && cp -a "$sdk_root/bin" "$DEST/"
+if [[ "$os" == MINGW* || "$os" == MSYS* || "$os" == CYGWIN* ]]; then
+  # Keep SDK C++ runtime DLLs out of the build-time PATH. They can shadow the
+  # runner's newer runtime and prevent libclang from loading during bindgen.
+  mkdir -p "$DEST/runtime"
+  for dll in "$DEST/bin"/ggml*.dll "$DEST/bin"/nemo_speech_asr*.dll "$DEST/bin"/vcomp140.dll; do
+    [[ -f "$dll" ]] && cp "$dll" "$DEST/runtime/"
+  done
+fi
 mkdir -p "$DEST/share/nemo-speech" "$DEST/share/licenses"
 cp "$sdk_root/share/nemo-speech/model-index.json" "$DEST/share/nemo-speech/"
 cp -a "$sdk_root/share/licenses/nemo-speech" "$DEST/share/licenses/"
