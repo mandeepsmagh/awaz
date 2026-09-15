@@ -57,6 +57,11 @@ rm -rf "$DEST"
 mkdir -p "$DEST"
 cp -a "$sdk_root/include" "$sdk_root/lib" "$DEST/"
 [[ -d "$sdk_root/bin" ]] && cp -a "$sdk_root/bin" "$DEST/"
+if [[ "$os" == Linux ]]; then
+  # Moonshine requires GLIBCXX_3.4.29, while NeMo's arm64 archive bundles a
+  # libstdc++ that stops at 3.4.28. Both providers use the newer host runtime.
+  rm -f "$DEST/lib"/libstdc++.so*
+fi
 mkdir -p "$DEST/link"
 if [[ "$os" == MINGW* || "$os" == MSYS* || "$os" == CYGWIN* ]]; then
   cp "$DEST/lib/nemo_speech_asr_c.lib" "$DEST/link/"

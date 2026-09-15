@@ -60,6 +60,18 @@ jobs:
       - name: Stage release tree
         shell: bash
         run: ./scripts/package-release.sh "$PWD/dist/awaz"
+      - name: Test staged package
+        shell: bash
+        run: |
+          smoke="$RUNNER_TEMP/awaz-package"
+          cp -a "$PWD/dist/awaz" "$smoke"
+          binary="$smoke/awaz"
+          [[ -f "$binary.exe" ]] && binary="$binary.exe"
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            "$binary" --version
+          else
+            env -u LD_LIBRARY_PATH -u DYLD_LIBRARY_PATH "$binary" --version
+          fi
       - name: Archive Unix
         if: matrix.archive == 'tar'
         shell: bash

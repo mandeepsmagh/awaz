@@ -55,6 +55,18 @@ jobs:
         run: cargo test --workspace
       - name: Build release
         run: cargo build --release -p awaz-cli
+      - name: Test staged package
+        shell: bash
+        run: |
+          package="$RUNNER_TEMP/awaz-package"
+          ./scripts/package-release.sh "$package"
+          binary="$package/awaz"
+          [[ -f "$binary.exe" ]] && binary="$binary.exe"
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            "$binary" --version
+          else
+            env -u LD_LIBRARY_PATH -u DYLD_LIBRARY_PATH "$binary" --version
+          fi
 
   protocol-core:
     runs-on: ubuntu-latest

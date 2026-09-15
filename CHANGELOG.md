@@ -2,22 +2,13 @@
 
 All notable changes to Awaz are documented here.
 
-## 0.5.2 - Windows runtime extraction
-
-- Extract the NeMo Speech Windows ZIP with PowerShell instead of Git Bash `tar`.
-- Keep NeMo's bundled C++ runtime out of Cargo's link path to prevent Linux GLIBCXX conflicts.
-
-## 0.5.1 - Release build compatibility
-
-- Keep bundled NeMo C++ runtime libraries out of build-time loader paths so the system libclang can load.
-- Expose only required NeMo ASR DLLs to Windows test executables.
-
 ## 0.5.0 - NeMo Speech provider
 
 - Add the opt-in NeMo Speech provider through its native C ABI.
 - Add Nemotron 3.5 streaming recognition and Parakeet TDT v3 full-utterance recognition.
 - Download pinned NeMo GGUF models with size and SHA-256 verification.
 - Stage and package pinned NeMo Speech runtimes for all release targets.
+- Isolate bundled compiler runtimes from CI toolchains and verify staged packages.
 - Keep Moonshine as the default provider while provider benchmarks continue.
 
 ## 0.4.0 - CLI lifecycle hardening
