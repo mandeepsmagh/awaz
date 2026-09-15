@@ -2,6 +2,11 @@
 
 All notable changes to Awaz are documented here.
 
+## 0.5.2 - Windows runtime extraction
+
+- Extract the NeMo Speech Windows ZIP with PowerShell instead of Git Bash `tar`.
+- Keep NeMo's bundled C++ runtime out of Cargo's link path to prevent Linux GLIBCXX conflicts.
+
 ## 0.5.1 - Release build compatibility
 
 - Keep bundled NeMo C++ runtime libraries out of build-time loader paths so the system libclang can load.

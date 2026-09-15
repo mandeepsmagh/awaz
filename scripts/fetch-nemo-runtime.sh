@@ -39,7 +39,14 @@ if [[ "$actual" != "$expected" ]]; then
   exit 3
 fi
 
-tar -xf "$tmp/$asset" -C "$tmp"
+if [[ "$asset" == *.zip ]]; then
+  archive_path="$(cygpath -w "$tmp/$asset")"
+  destination_path="$(cygpath -w "$tmp")"
+  powershell.exe -NoProfile -NonInteractive -Command \
+    "Expand-Archive -LiteralPath '$archive_path' -DestinationPath '$destination_path' -Force"
+else
+  tar -xzf "$tmp/$asset" -C "$tmp"
+fi
 header="$(find "$tmp" -type f -path '*/include/nemo_speech/asr.h' | head -n1 || true)"
 if [[ -z "$header" ]]; then
   echo "Could not locate the NeMo Speech SDK inside $asset" >&2
@@ -50,12 +57,20 @@ rm -rf "$DEST"
 mkdir -p "$DEST"
 cp -a "$sdk_root/include" "$sdk_root/lib" "$DEST/"
 [[ -d "$sdk_root/bin" ]] && cp -a "$sdk_root/bin" "$DEST/"
+mkdir -p "$DEST/link"
 if [[ "$os" == MINGW* || "$os" == MSYS* || "$os" == CYGWIN* ]]; then
+  cp "$DEST/lib/nemo_speech_asr_c.lib" "$DEST/link/"
   # Keep SDK C++ runtime DLLs out of the build-time PATH. They can shadow the
   # runner's newer runtime and prevent libclang from loading during bindgen.
   mkdir -p "$DEST/runtime"
   for dll in "$DEST/bin"/ggml*.dll "$DEST/bin"/nemo_speech_asr*.dll "$DEST/bin"/vcomp140.dll; do
     [[ -f "$dll" ]] && cp "$dll" "$DEST/runtime/"
+  done
+else
+  # Do not put the SDK's bundled libstdc++ in Cargo's link search path. The
+  # Moonshine runtime can require newer GLIBCXX symbols than that copy exports.
+  for library in "$DEST/lib"/libggml* "$DEST/lib"/libnemo_speech_asr*; do
+    [[ -e "$library" || -L "$library" ]] && cp -a "$library" "$DEST/link/"
   done
 fi
 mkdir -p "$DEST/share/nemo-speech" "$DEST/share/licenses"

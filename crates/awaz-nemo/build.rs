@@ -2,12 +2,12 @@ use std::{env, path::PathBuf};
 
 fn main() {
     println!("cargo:rerun-if-env-changed=AWAZ_NEMO_LIB_DIR");
-    println!("cargo:rerun-if-changed=../../vendor/nemo/lib");
+    println!("cargo:rerun-if-changed=../../vendor/nemo/link");
 
     let candidate = env::var_os("AWAZ_NEMO_LIB_DIR")
         .map(PathBuf::from)
         .or_else(|| {
-            let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../vendor/nemo/lib");
+            let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../vendor/nemo/link");
             path.exists().then_some(path)
         });
 
