@@ -2,7 +2,7 @@
 
 All notable changes to Awaz are documented here.
 
-## Unreleased
+## 0.5.0 - NeMo Speech provider
 
 - Add the opt-in NeMo Speech provider through its native C ABI.
 - Add Nemotron 3.5 streaming recognition and Parakeet TDT v3 full-utterance recognition.
