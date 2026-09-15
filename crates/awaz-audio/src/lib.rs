@@ -44,7 +44,7 @@ impl Default for CaptureConfig {
 }
 
 pub struct AudioCapture {
-    _stream: cpal::Stream,
+    stream: cpal::Stream,
     receiver: Receiver<AudioChunk>,
     errors: Receiver<String>,
     dropped_chunks: Arc<AtomicU64>,
@@ -116,18 +116,26 @@ impl AudioCapture {
         }
         .map_err(|e| AudioError::Backend(e.to_string()))?;
 
-        stream
-            .play()
-            .map_err(|e| AudioError::Backend(e.to_string()))?;
-
         Ok(Self {
-            _stream: stream,
+            stream,
             receiver,
             errors,
             dropped_chunks,
             device_name,
             sample_rate,
         })
+    }
+
+    pub fn play(&self) -> Result<(), AudioError> {
+        self.stream
+            .play()
+            .map_err(|error| AudioError::Backend(error.to_string()))
+    }
+
+    pub fn pause(&self) -> Result<(), AudioError> {
+        self.stream
+            .pause()
+            .map_err(|error| AudioError::Backend(error.to_string()))
     }
 
     pub fn receiver(&self) -> Receiver<AudioChunk> {

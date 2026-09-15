@@ -18,6 +18,10 @@ Change `moonshine.version` to select a new Moonshine release. The runtime downlo
 
 Change `nemo.version` only after comparing the release `include/nemo_speech/asr.h` with `awaz-nemo/src/ffi.rs`. The v1 ABI uses size-prefixed append-only structures, but Awaz must still verify layouts and behavior before an update. Model metadata in `awaz-nemo/src/lib.rs` comes from the pinned release's `share/nemo-speech/model-index.json`. Update each revision, size, and SHA-256 value together. Release archives retain the complete NeMo Speech license directory.
 
+## Microphone lifecycle
+
+`awaz serve` keeps the recognizer process and model warm, but it keeps the input stream paused while the voice state is idle. Start the stream for `listen.start`. Pause it before draining the final queued audio for `listen.stop`, and pause it when a listening session is cancelled. Do not capture idle pre-roll. On macOS, an active idle stream leaves the system microphone privacy indicator visible and tells the user that Awaz is listening when it is not.
+
 ## Error protocol
 
 Each protocol error includes the authoritative voice state. It also states whether the process must exit. Integrations must synchronize to that state after recoverable errors. Audio stream failures are fatal protocol errors. Optional provider operations return `unsupported` when a provider does not implement them.

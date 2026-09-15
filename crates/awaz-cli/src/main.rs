@@ -8,7 +8,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use crossbeam_channel::{Receiver, Sender, TrySendError, bounded, select, select_biased, tick};
 use sha2::{Digest, Sha256};
 use std::{
-    collections::{HashSet, VecDeque},
+    collections::HashSet,
     fs::{File, OpenOptions},
     io::{self, BufRead, BufReader, IsTerminal, Read, Write},
     path::{Component, Path, PathBuf},
@@ -168,8 +168,6 @@ struct ServeArgs {
     common: CommonArgs,
     #[arg(long, help = "Microphone device name; see `awaz devices`")]
     device: Option<String>,
-    #[arg(long, default_value_t = 450)]
-    preroll_ms: u32,
 }
 
 fn main() -> Result<()> {
@@ -589,6 +587,8 @@ fn doctor(common: CommonArgs) -> Result<()> {
     eprintln!("  audio devices      {}", devices.len());
     eprintln!("  default microphone {default}");
     let capture = AudioCapture::start(CaptureConfig::default()).map_err(anyhow::Error::from)?;
+    capture.play().map_err(anyhow::Error::from)?;
+    capture.pause().map_err(anyhow::Error::from)?;
     eprintln!("  audio capture      ready ({})", capture.device_name);
     drop(capture);
 
@@ -652,6 +652,7 @@ fn mic(args: MicArgs) -> Result<()> {
     });
 
     rx.recv()?;
+    capture.play().map_err(anyhow::Error::from)?;
     let audio_rx = capture.receiver();
     while audio_rx.try_recv().is_ok() {}
     let dropped_at_start = capture.dropped_chunks();
@@ -705,6 +706,7 @@ fn mic(args: MicArgs) -> Result<()> {
     }
 
     eprintln!();
+    capture.pause().map_err(anyhow::Error::from)?;
 
     // Drain audio still queued from the capture callback before finalizing, so
     // the tail of the utterance is not lost when Enter stops the loop.
@@ -856,7 +858,6 @@ struct ServeSession {
     cancelled: HashSet<u64>,
     cancel_token: Arc<AtomicBool>,
     poll_pending: bool,
-    preroll: VecDeque<f32>,
     worker_dropped: u64,
     dropped_at_start: u64,
 }
@@ -917,14 +918,12 @@ fn serve(args: ServeArgs) -> Result<()> {
     let (worker_responses, recognizer_rx) = bounded(16);
     thread::spawn(move || recognizer_worker(recognizer, worker_commands, worker_responses));
 
-    let preroll_capacity = ((capture.sample_rate as u64 * args.preroll_ms as u64) / 1000) as usize;
     let mut session = ServeSession {
         state: VoiceState::Idle,
         utterance: 0,
         cancelled: HashSet::new(),
         cancel_token: Arc::new(AtomicBool::new(false)),
         poll_pending: false,
-        preroll: VecDeque::with_capacity(preroll_capacity.max(1)),
         worker_dropped: 0,
         dropped_at_start: 0,
     };
@@ -973,8 +972,6 @@ fn serve(args: ServeArgs) -> Result<()> {
                 };
                 if session.state == VoiceState::Listening {
                     forward_audio(&recognizer_tx, chunk, &mut session.worker_dropped)?;
-                } else {
-                    retain_preroll(&mut session.preroll, preroll_capacity, chunk.samples);
                 }
             }
             recv(recognizer_rx) -> response => {
@@ -1100,18 +1097,6 @@ fn serve(args: ServeArgs) -> Result<()> {
     Ok(())
 }
 
-fn retain_preroll(preroll: &mut VecDeque<f32>, capacity: usize, samples: Vec<f32>) {
-    if capacity == 0 {
-        return;
-    }
-    for sample in samples {
-        if preroll.len() == capacity {
-            preroll.pop_front();
-        }
-        preroll.push_back(sample);
-    }
-}
-
 fn command_reader() -> Receiver<std::result::Result<Command, String>> {
     let (tx, rx) = bounded(64);
     thread::spawn(move || {
@@ -1150,6 +1135,8 @@ fn handle_command(
                 return Ok(false);
             }
 
+            while audio_rx.try_recv().is_ok() {}
+            capture.play().map_err(anyhow::Error::from)?;
             session.utterance = session.utterance.wrapping_add(1);
             session.cancel_token = Arc::new(AtomicBool::new(false));
             session.dropped_at_start = capture
@@ -1159,17 +1146,6 @@ fn handle_command(
                 .send(RecognizerCommand::Start(session.utterance))
                 .context("recognizer worker stopped")?;
             session.state.transition(VoiceState::Listening)?;
-            if !session.preroll.is_empty() {
-                let samples = session.preroll.drain(..).collect();
-                forward_audio(
-                    recognizer_tx,
-                    awaz_core::AudioChunk {
-                        samples,
-                        sample_rate: capture.sample_rate,
-                    },
-                    &mut session.worker_dropped,
-                )?;
-            }
         }
         Command::ListenStop => {
             if session.state != VoiceState::Listening {
@@ -1178,6 +1154,7 @@ fn handle_command(
             }
 
             session.state.transition(VoiceState::Finalizing)?;
+            capture.pause().map_err(anyhow::Error::from)?;
             drain_audio_to_worker(audio_rx, recognizer_tx, &mut session.worker_dropped)?;
             recognizer_tx
                 .send(RecognizerCommand::Finish(
@@ -1188,6 +1165,9 @@ fn handle_command(
         }
         Command::ListenCancel => {
             if session.state == VoiceState::Listening || session.state == VoiceState::Finalizing {
+                if session.state == VoiceState::Listening {
+                    capture.pause().map_err(anyhow::Error::from)?;
+                }
                 let id = session.utterance;
                 session.cancelled.insert(id);
                 session.cancel_token.store(true, Ordering::Release);
@@ -1316,13 +1296,6 @@ mod tests {
         assert!(signed_pcm_scale(0).is_err());
         assert!(signed_pcm_scale(1).is_err());
         assert!(signed_pcm_scale(33).is_err());
-    }
-
-    #[test]
-    fn preroll_keeps_only_the_latest_samples() {
-        let mut preroll = VecDeque::new();
-        retain_preroll(&mut preroll, 3, vec![1.0, 2.0, 3.0, 4.0]);
-        assert_eq!(preroll.into_iter().collect::<Vec<_>>(), vec![2.0, 3.0, 4.0]);
     }
 
     #[test]
