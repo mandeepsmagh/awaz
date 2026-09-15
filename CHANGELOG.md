@@ -2,6 +2,11 @@
 
 All notable changes to Awaz are documented here.
 
+## Unreleased
+
+- Add a reusable recognizer lifecycle conformance suite with opt-in native provider tests.
+- Return an empty final result instead of timing out when Apple Speech finishes without audio.
+
 ## 0.5.0 - NeMo Speech provider
 
 - Add the opt-in NeMo Speech provider through its native C ABI.

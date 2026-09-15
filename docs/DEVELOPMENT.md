@@ -34,6 +34,19 @@ Keep unsafe Rust in provider-specific FFI crates. Document the safety contract a
 
 Use current Node 24 action patch tags and GitHub's latest hosted runner aliases. Keep an explicit runner label when GitHub has no architecture-specific latest alias. The workflows stage the Moonshine and NeMo Speech runtimes; no Python or uv is involved. Do not put the full NeMo library directory in a build-time loader or linker path. Its bundled C++ runtime can shadow the runner toolchain, prevent libclang from loading, or conflict with Moonshine's required GLIBCXX symbols. The staging script creates a filtered `link` directory for Cargo. It removes NeMo's bundled Linux `libstdc++`, which is older than Moonshine's required GLIBCXX baseline. Both Linux providers use the host C++ runtime. Release builds use relative runpaths only. CI copies each staged package outside the workspace and clears loader-path variables before it runs the smoke test. Windows build jobs extract the SDK ZIP with PowerShell and expose a filtered ASR DLL directory. The release workflow packages no model weights, so model downloads happen on first use.
 
+## Provider conformance
+
+`awaz-provider-conformance` applies one lifecycle suite to every recognizer. Normal workspace tests run the harness against deterministic recognizers. Native tests are ignored unless selected explicitly because they require local models or Apple Speech assets.
+
+```text
+AWAZ_TEST_MOONSHINE_MODEL_DIR=/path/to/small-streaming cargo test -p awaz-provider-conformance --test native moonshine_conforms -- --ignored --exact
+AWAZ_TEST_NEMOTRON_MODEL_PATH=/path/to/nemotron.gguf cargo test -p awaz-provider-conformance --test native nemotron_conforms -- --ignored --exact
+AWAZ_TEST_PARAKEET_MODEL_PATH=/path/to/parakeet.gguf cargo test -p awaz-provider-conformance --test native parakeet_conforms -- --ignored --exact
+cargo test -p awaz-provider-conformance --test native apple_speech_conforms -- --ignored --exact
+```
+
+Run native tests serially. Each test keeps one model loaded and checks silence, cancellation, restart, repeated utterances, final-event count, stale output, and customization capability errors.
+
 ## Checks
 
 Run these checks before a commit. Run the final Swift command only on macOS.

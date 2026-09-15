@@ -255,6 +255,7 @@ Before a release is considered solid:
 - `cargo clippy --workspace --all-targets -- -D warnings`
 - `cargo test --workspace`
 - deterministic WAV fixture → recognizer smoke test
+- shared lifecycle conformance suite for each provider
 - `awaz doctor`
 - physical microphone smoke tests on NixOS/Linux and macOS 26+ on Apple Silicon
 - packaged archive smoke test

@@ -46,4 +46,6 @@ For the first real machine, validate in this order:
 
 Record model load time, peak memory, audio duration, time to first partial, and stop-to-final latency. Compare transcript accuracy on the same saved WAV files. Do not select a default from the JFK fixture alone.
 
+Run the opt-in native lifecycle checks from `docs/DEVELOPMENT.md` after staging each provider model. They test silence, cancellation, immediate restart, repeated use, stale events, and final-event count through one shared suite.
+
 Any failure in those checks should be fixed at its owning boundary (audio, provider, protocol, integration) rather than by adding another framework layer.

@@ -131,6 +131,13 @@ mod platform {
             if !self.active {
                 return Ok(vec![SpeechEvent::Final(String::new())]);
             }
+            if self.audio_seconds == 0.0 {
+                self.send(CANCEL, &[])?;
+                self.wait_for(|event| matches!(event, HelperEvent::Cancelled))?;
+                self.active = false;
+                return Ok(vec![SpeechEvent::Final(String::new())]);
+            }
+
             self.send(FINISH, &[])?;
             let timeout = FINISH_TIMEOUT.max(Duration::from_secs_f64(
                 self.audio_seconds.mul_add(2.0, 30.0),

@@ -1,0 +1,17 @@
+[package]
+name = "awaz-provider-conformance"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+build = "build.rs"
+
+[dependencies]
+awaz-core = { path = "../awaz-core" }
+
+[dev-dependencies]
+awaz-apple-speech = { path = "../awaz-apple-speech" }
+awaz-moonshine = { path = "../awaz-moonshine" }
+awaz-nemo = { path = "../awaz-nemo" }
+hound.workspace = true

@@ -5,6 +5,7 @@ members = [
   "crates/awaz-apple-speech",
   "crates/awaz-moonshine",
   "crates/awaz-nemo",
+  "crates/awaz-provider-conformance",
   "crates/awaz-cli",
 ]
 resolver = "3"
