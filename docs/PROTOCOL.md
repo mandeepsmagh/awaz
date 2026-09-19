@@ -121,4 +121,4 @@ Errors remain protocol data:
 
 `state` is the authoritative Awaz state after the error. Integrations must synchronize to it. `fatal` means the recognizer cannot continue and the process will exit.
 
-Malformed input is reported as `bad_json` without terminating the process. A runtime microphone failure is reported as a fatal `audio_error`, then the process exits.
+Malformed input is reported as `bad_json` without terminating the process. A microphone failure while an utterance is listening is reported as a fatal `audio_error`, then the process exits. A microphone failure while idle or finalizing is recoverable: the engine stays alive, logs a warning on stderr, and rebuilds the stream before the next `listen.start`.

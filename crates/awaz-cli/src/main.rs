@@ -1,11 +1,13 @@
 use anyhow::{Context, Result, anyhow};
 use awaz_apple_speech::AppleSpeechRecognizer;
-use awaz_audio::{AudioCapture, CaptureConfig, list_input_devices};
+use awaz_audio::{AudioCapture, AudioError, CaptureConfig, list_input_devices};
 use awaz_core::{Command, Event, Recognizer, RecognizerError, SpeechEvent, VoiceState};
 use awaz_moonshine::{ModelSize, MoonshineRecognizer, default_model_dir};
 use awaz_nemo::{NemoModel, NemoRecognizer, default_model_path as default_nemo_model_path};
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use crossbeam_channel::{Receiver, Sender, TrySendError, bounded, select, select_biased, tick};
+use crossbeam_channel::{
+    Receiver, Sender, TrySendError, bounded, never, select, select_biased, tick,
+};
 use sha2::{Digest, Sha256};
 use std::{
     collections::HashSet,
@@ -900,18 +902,151 @@ fn recognizer_worker(
     }
 }
 
+/// The microphone contract that `serve` needs.
+///
+/// The real implementation wraps `AudioCapture`. Tests use a fake so the rebuild policy runs
+/// without an audio device.
+trait Microphone {
+    fn start_stream(&self) -> Result<(), AudioError>;
+    fn pause_stream(&self) -> Result<(), AudioError>;
+    fn audio_receiver(&self) -> Receiver<awaz_core::AudioChunk>;
+    fn audio_error_receiver(&self) -> Receiver<String>;
+    fn dropped_chunk_count(&self) -> u64;
+}
+
+impl Microphone for AudioCapture {
+    fn start_stream(&self) -> Result<(), AudioError> {
+        self.play()
+    }
+
+    fn pause_stream(&self) -> Result<(), AudioError> {
+        self.pause()
+    }
+
+    fn audio_receiver(&self) -> Receiver<awaz_core::AudioChunk> {
+        self.receiver()
+    }
+
+    fn audio_error_receiver(&self) -> Receiver<String> {
+        self.error_receiver()
+    }
+
+    fn dropped_chunk_count(&self) -> u64 {
+        self.dropped_chunks()
+    }
+}
+
+/// An audio stream error is fatal only while the stream carries a live utterance.
+///
+/// A stream that fails while idle must not stop the process. The next `listen.start` rebuilds
+/// it. This keeps `serve` alive after a device change or a long idle pause.
+fn audio_error_is_fatal(state: VoiceState) -> bool {
+    state == VoiceState::Listening
+}
+
+/// Owns the microphone stream for one `serve` process.
+///
+/// The stream stays paused while idle so the macOS microphone indicator clears. A stream that
+/// errors while idle, or that fails to start, is rebuilt from the current default device before
+/// the next utterance.
+struct AudioSession<M: Microphone> {
+    config: CaptureConfig,
+    microphone: M,
+    audio_rx: Receiver<awaz_core::AudioChunk>,
+    audio_errors: Receiver<String>,
+    needs_rebuild: bool,
+}
+
+impl<M: Microphone> AudioSession<M> {
+    fn with_microphone(config: CaptureConfig, microphone: M) -> Self {
+        let audio_rx = microphone.audio_receiver();
+        let audio_errors = microphone.audio_error_receiver();
+        Self {
+            config,
+            microphone,
+            audio_rx,
+            audio_errors,
+            needs_rebuild: false,
+        }
+    }
+
+    fn note_stream_error(&mut self) {
+        self.needs_rebuild = true;
+    }
+
+    /// Start the stream for an utterance. Rebuild once through `rebuild` when the stream is
+    /// known to be stale or when the first start attempt fails.
+    fn start_stream<F>(&mut self, rebuild: F) -> Result<()>
+    where
+        F: FnOnce(&CaptureConfig) -> Result<M, AudioError>,
+    {
+        if !self.needs_rebuild && self.microphone.start_stream().is_ok() {
+            return Ok(());
+        }
+        self.microphone = rebuild(&self.config).map_err(anyhow::Error::from)?;
+        self.audio_rx = self.microphone.audio_receiver();
+        self.audio_errors = self.microphone.audio_error_receiver();
+        self.needs_rebuild = false;
+        self.microphone.start_stream().map_err(anyhow::Error::from)
+    }
+
+    fn pause_stream(&self) -> Result<()> {
+        self.microphone.pause_stream().map_err(anyhow::Error::from)
+    }
+
+    fn dropped_chunks(&self) -> u64 {
+        self.microphone.dropped_chunk_count()
+    }
+
+    fn audio_rx(&self) -> Receiver<awaz_core::AudioChunk> {
+        // A stream that is known to be stale must not spin the select loop on a disconnected
+        // channel. The next utterance rebuilds the stream through `play`.
+        if self.needs_rebuild {
+            return never();
+        }
+        self.audio_rx.clone()
+    }
+
+    fn audio_errors(&self) -> Receiver<String> {
+        if self.needs_rebuild {
+            return never();
+        }
+        self.audio_errors.clone()
+    }
+
+    fn drain_pending(&self) {
+        while self.audio_rx.try_recv().is_ok() {}
+    }
+
+    fn drain_to_worker(
+        &self,
+        recognizer_tx: &Sender<RecognizerCommand>,
+        worker_dropped: &mut u64,
+    ) -> Result<()> {
+        drain_audio_to_worker(&self.audio_rx, recognizer_tx, worker_dropped)
+    }
+}
+
+impl AudioSession<AudioCapture> {
+    fn connect(config: CaptureConfig) -> Result<Self> {
+        let capture = AudioCapture::start(config.clone()).map_err(anyhow::Error::from)?;
+        Ok(Self::with_microphone(config, capture))
+    }
+
+    fn play(&mut self) -> Result<()> {
+        self.start_stream(|config| AudioCapture::start(config.clone()))
+    }
+}
+
 fn serve(args: ServeArgs) -> Result<()> {
     let LoadedRecognizer {
         provider,
         recognizer,
     } = load_recognizer(&args.common)?;
-    let capture = AudioCapture::start(CaptureConfig {
+    let mut audio = AudioSession::connect(CaptureConfig {
         device_name: args.device,
         ..Default::default()
-    })
-    .map_err(anyhow::Error::from)?;
-    let audio_rx = capture.receiver();
-    let audio_errors = capture.error_receiver();
+    })?;
     let command_rx = command_reader();
     let poll_tick = tick(Duration::from_millis(80));
     let (recognizer_tx, worker_commands) = bounded(1024);
@@ -938,6 +1073,8 @@ fn serve(args: ServeArgs) -> Result<()> {
     })?;
 
     loop {
+        let audio_rx = audio.audio_rx();
+        let audio_errors = audio.audio_errors();
         select_biased! {
             recv(command_rx) -> command => {
                 let Ok(command) = command else {
@@ -946,13 +1083,7 @@ fn serve(args: ServeArgs) -> Result<()> {
                 };
                 match command {
                     Ok(command) => {
-                        if handle_command(
-                            command,
-                            &mut session,
-                            &audio_rx,
-                            &capture,
-                            &recognizer_tx,
-                        )? {
+                        if handle_command(command, &mut session, &mut audio, &recognizer_tx)? {
                             break;
                         }
                     }
@@ -960,18 +1091,34 @@ fn serve(args: ServeArgs) -> Result<()> {
                 }
             }
             recv(audio_errors) -> message => {
-                let message = message.unwrap_or_else(|_| "audio error channel closed".into());
-                emit_error("audio_error", &message, session.state, true)?;
-                let _ = recognizer_tx.try_send(RecognizerCommand::Shutdown);
-                return Err(anyhow!("audio input failed: {message}"));
+                if audio_error_is_fatal(session.state) {
+                    let message = message.unwrap_or_else(|_| "audio error channel closed".into());
+                    emit_error("audio_error", &message, session.state, true)?;
+                    let _ = recognizer_tx.try_send(RecognizerCommand::Shutdown);
+                    return Err(anyhow!("audio input failed: {message}"));
+                }
+                // A paused stream can fail while idle, for example after a device change.
+                // Keep the process alive and rebuild the stream before the next utterance.
+                audio.note_stream_error();
+                match message {
+                    Ok(message) => {
+                        eprintln!("warning: microphone stream error while idle: {message}")
+                    }
+                    Err(_) => eprintln!("warning: microphone stream closed while idle"),
+                }
             }
             recv(audio_rx) -> message => {
-                let Ok(chunk) = message else {
-                    emit_error("audio_error", "audio input stopped", session.state, true)?;
-                    return Err(anyhow!("audio input stopped"));
-                };
-                if session.state == VoiceState::Listening {
-                    forward_audio(&recognizer_tx, chunk, &mut session.worker_dropped)?;
+                match message {
+                    Ok(chunk) => {
+                        if session.state == VoiceState::Listening {
+                            forward_audio(&recognizer_tx, chunk, &mut session.worker_dropped)?;
+                        }
+                    }
+                    Err(_) if audio_error_is_fatal(session.state) => {
+                        emit_error("audio_error", "audio input stopped", session.state, true)?;
+                        return Err(anyhow!("audio input stopped"));
+                    }
+                    Err(_) => audio.note_stream_error(),
                 }
             }
             recv(recognizer_rx) -> response => {
@@ -1029,7 +1176,7 @@ fn serve(args: ServeArgs) -> Result<()> {
                             emit_finalized(events)?;
                             session.state.transition(VoiceState::Idle)?;
                             warn_dropped_audio(
-                                &capture,
+                                audio.dropped_chunks(),
                                 session.worker_dropped,
                                 session.dropped_at_start,
                             );
@@ -1120,8 +1267,7 @@ fn command_reader() -> Receiver<std::result::Result<Command, String>> {
 fn handle_command(
     command: Command,
     session: &mut ServeSession,
-    audio_rx: &Receiver<awaz_core::AudioChunk>,
-    capture: &AudioCapture,
+    audio: &mut AudioSession<AudioCapture>,
     recognizer_tx: &Sender<RecognizerCommand>,
 ) -> Result<bool> {
     match command {
@@ -1135,11 +1281,11 @@ fn handle_command(
                 return Ok(false);
             }
 
-            while audio_rx.try_recv().is_ok() {}
-            capture.play().map_err(anyhow::Error::from)?;
+            audio.drain_pending();
+            audio.play()?;
             session.utterance = session.utterance.wrapping_add(1);
             session.cancel_token = Arc::new(AtomicBool::new(false));
-            session.dropped_at_start = capture
+            session.dropped_at_start = audio
                 .dropped_chunks()
                 .saturating_add(session.worker_dropped);
             recognizer_tx
@@ -1154,8 +1300,8 @@ fn handle_command(
             }
 
             session.state.transition(VoiceState::Finalizing)?;
-            capture.pause().map_err(anyhow::Error::from)?;
-            drain_audio_to_worker(audio_rx, recognizer_tx, &mut session.worker_dropped)?;
+            audio.pause_stream()?;
+            audio.drain_to_worker(recognizer_tx, &mut session.worker_dropped)?;
             recognizer_tx
                 .send(RecognizerCommand::Finish(
                     session.utterance,
@@ -1166,7 +1312,7 @@ fn handle_command(
         Command::ListenCancel => {
             if session.state == VoiceState::Listening || session.state == VoiceState::Finalizing {
                 if session.state == VoiceState::Listening {
-                    capture.pause().map_err(anyhow::Error::from)?;
+                    audio.pause_stream()?;
                 }
                 let id = session.utterance;
                 session.cancelled.insert(id);
@@ -1235,8 +1381,8 @@ fn drain_audio_to_worker(
     Ok(())
 }
 
-fn warn_dropped_audio(capture: &AudioCapture, worker_dropped: u64, baseline: u64) {
-    let total = capture.dropped_chunks().saturating_add(worker_dropped);
+fn warn_dropped_audio(dropped_chunks: u64, worker_dropped: u64, baseline: u64) {
+    let total = dropped_chunks.saturating_add(worker_dropped);
     let dropped = total.saturating_sub(baseline);
     if dropped > 0 {
         eprintln!("warning: dropped {dropped} audio chunks during the utterance");
@@ -1290,6 +1436,139 @@ fn emit_error(code: &str, message: &str, state: VoiceState, fatal: bool) -> Resu
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crossbeam_channel::TryRecvError;
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    struct FakeMicrophone {
+        start_failures: usize,
+        starts: Rc<Cell<usize>>,
+    }
+
+    impl Microphone for FakeMicrophone {
+        fn start_stream(&self) -> Result<(), AudioError> {
+            self.starts.set(self.starts.get() + 1);
+            if self.start_failures > 0 {
+                return Err(AudioError::Backend("scripted failure".into()));
+            }
+            Ok(())
+        }
+
+        fn pause_stream(&self) -> Result<(), AudioError> {
+            Ok(())
+        }
+
+        fn audio_receiver(&self) -> Receiver<awaz_core::AudioChunk> {
+            let (_sender, receiver) = bounded(1);
+            receiver
+        }
+
+        fn audio_error_receiver(&self) -> Receiver<String> {
+            let (_sender, receiver) = bounded(1);
+            receiver
+        }
+
+        fn dropped_chunk_count(&self) -> u64 {
+            0
+        }
+    }
+
+    fn fake_microphone(start_failures: usize) -> (FakeMicrophone, Rc<Cell<usize>>) {
+        let starts = Rc::new(Cell::new(0));
+        (
+            FakeMicrophone {
+                start_failures,
+                starts: Rc::clone(&starts),
+            },
+            starts,
+        )
+    }
+
+    #[test]
+    fn idle_audio_errors_are_recoverable() {
+        assert!(audio_error_is_fatal(VoiceState::Listening));
+        assert!(!audio_error_is_fatal(VoiceState::Idle));
+        assert!(!audio_error_is_fatal(VoiceState::Finalizing));
+        assert!(!audio_error_is_fatal(VoiceState::Speaking));
+    }
+
+    #[test]
+    fn stale_stream_is_rebuilt_before_an_utterance() {
+        let (microphone, starts) = fake_microphone(0);
+        let mut session = AudioSession::with_microphone(CaptureConfig::default(), microphone);
+        session.note_stream_error();
+
+        let mut rebuilds = 0;
+        session
+            .start_stream(|_| {
+                rebuilds += 1;
+                Ok(fake_microphone(0).0)
+            })
+            .unwrap();
+
+        assert_eq!(
+            rebuilds, 1,
+            "a stream that errored while idle must be rebuilt"
+        );
+        assert_eq!(starts.get(), 0, "the stale stream must not be started");
+    }
+
+    #[test]
+    fn failed_stream_start_rebuilds_once() {
+        let (microphone, starts) = fake_microphone(1);
+        let mut session = AudioSession::with_microphone(CaptureConfig::default(), microphone);
+
+        let mut rebuilds = 0;
+        session
+            .start_stream(|_| {
+                rebuilds += 1;
+                Ok(fake_microphone(0).0)
+            })
+            .unwrap();
+
+        assert_eq!(
+            rebuilds, 1,
+            "a failed start must rebuild the stream exactly once"
+        );
+        assert_eq!(
+            starts.get(),
+            1,
+            "the fake counts only the failed start attempt"
+        );
+    }
+
+    #[test]
+    fn healthy_stream_is_not_rebuilt() {
+        let (microphone, starts) = fake_microphone(0);
+        let mut session = AudioSession::with_microphone(CaptureConfig::default(), microphone);
+
+        let mut rebuilds = 0;
+        session
+            .start_stream(|_| {
+                rebuilds += 1;
+                Ok(fake_microphone(0).0)
+            })
+            .unwrap();
+
+        assert_eq!(rebuilds, 0);
+        assert_eq!(starts.get(), 1);
+    }
+
+    #[test]
+    fn a_stale_session_stops_listening_on_its_channels() {
+        let (microphone, _starts) = fake_microphone(0);
+        let mut session = AudioSession::with_microphone(CaptureConfig::default(), microphone);
+        session.note_stream_error();
+
+        assert!(matches!(
+            session.audio_rx().try_recv(),
+            Err(TryRecvError::Empty)
+        ));
+        assert!(matches!(
+            session.audio_errors().try_recv(),
+            Err(TryRecvError::Empty)
+        ));
+    }
 
     #[test]
     fn signed_pcm_scale_rejects_invalid_bit_depths() {

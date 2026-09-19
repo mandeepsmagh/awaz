@@ -22,9 +22,11 @@ Change `nemo.version` only after comparing the release `include/nemo_speech/asr.
 
 `awaz serve` keeps the recognizer process and model warm, but it keeps the input stream paused while the voice state is idle. Start the stream for `listen.start`. Pause it before draining the final queued audio for `listen.stop`, and pause it when a listening session is cancelled. Do not capture idle pre-roll. On macOS, an active idle stream leaves the system microphone privacy indicator visible and tells the user that Awaz is listening when it is not.
 
+A paused stream can fail or go stale after a device route change or a long idle. Do not exit when this happens while idle. Mark the stream for rebuild, ignore its channels so the protocol loop cannot spin, and build a fresh stream from the current default device before the next `listen.start`. Rebuild once if the first `play` fails. `AudioSession` in `awaz-cli` owns this policy. The `Microphone` trait isolates it from a real device so tests can run without one.
+
 ## Error protocol
 
-Each protocol error includes the authoritative voice state. It also states whether the process must exit. Integrations must synchronize to that state after recoverable errors. Audio stream failures are fatal protocol errors. Optional provider operations return `unsupported` when a provider does not implement them.
+Each protocol error includes the authoritative voice state. It also states whether the process must exit. Integrations must synchronize to that state after recoverable errors. An audio stream failure is fatal only while an utterance is listening. A failure while idle or finalizing is recoverable: the engine stays alive and rebuilds the stream. Optional provider operations return `unsupported` when a provider does not implement them.
 
 ## Native code
 

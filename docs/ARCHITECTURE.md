@@ -38,9 +38,16 @@ The CPAL callback may convert/downmix and enqueue audio, but it must never run n
 
 The queues are bounded. If consumers fall behind, Awaz counts dropped chunks rather than blocking the real-time capture callback. The protocol controller sends audio to a dedicated recognizer worker. Neural inference cannot block stdin commands or microphone queue draining.
 
-## Pre-roll
+## Microphone lifecycle
 
-`awaz serve` continuously retains a small rolling PCM window while idle (450 ms by default). When `listen.start` arrives, that pre-roll is fed to the recognizer before live chunks. This protects the first syllable when a user presses a hotkey and speaks nearly simultaneously.
+`awaz serve` keeps one microphone stream for the session and pauses it while the voice state
+is idle, so the macOS microphone privacy indicator clears. `listen.start` starts the stream.
+`listen.stop` and `listen.cancel` pause it. Idle audio is never captured.
+
+A stream that fails while idle, or that fails to start, does not stop the process. The engine
+rebuilds the stream from the current default input device before the next utterance. This
+covers a device route change and a long idle pause. A stream failure while listening stays
+fatal.
 
 ## Provider contract
 
@@ -76,7 +83,7 @@ Idle → Listening → Finalizing → Idle
 
 ## Utterance boundaries
 
-The controller stops forwarding utterance audio when it accepts `listen.stop` or `listen.cancel`. Audio captured while the recognizer finalizes becomes bounded pre-roll for the next utterance. It never enters the utterance that is finalizing. Each worker command carries an utterance identity, so a cancelled final result cannot appear in a later utterance.
+The controller stops forwarding utterance audio when it accepts `listen.stop` or `listen.cancel`. The stream is paused before the queued audio is drained to the recognizer, so the utterance tail is not lost and no live audio enters the completed utterance. Each worker command carries an utterance identity, so a cancelled final result cannot appear in a later utterance.
 
 ## Process model
 
@@ -120,8 +127,6 @@ Platform code should stay in audio/packaging layers. Integrations and provider-n
 
 The architecture explicitly leaves room for:
 
-- device route-change recovery;
-- reopen-with-backoff without killing the session;
 - transactional provider/model switching;
 - model auto-benchmarking;
 - TTS provider and playback;
