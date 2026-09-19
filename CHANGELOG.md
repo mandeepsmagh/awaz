@@ -2,6 +2,14 @@
 
 All notable changes to Awaz are documented here.
 
+## 0.5.3 - Idle microphone recovery
+
+- Recover from a microphone stream that fails while the engine is idle. The process stays alive
+  and rebuilds the stream before the next utterance. This fixes the first dictation after a long
+  idle pause.
+- Keep an audio stream failure fatal only while an utterance is live.
+- Stop the protocol loop from spinning on a disconnected audio channel.
+
 ## 0.5.1 - Provider conformance
 
 - Add a reusable recognizer lifecycle conformance suite with opt-in native provider tests.

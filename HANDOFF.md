@@ -2,13 +2,31 @@
 
 ## Status
 
+Awaz CLI 0.5.3 is prepared. The version is 0.5.3. The tag is not pushed. Do not tag until the
+checks and the hardware test pass.
+
+0.5.3 fixes the first-dictation-after-idle failure in `serve`. A microphone stream that fails
+while idle no longer stops the process. The engine marks the stream for rebuild, stops reading
+its channels so the protocol loop cannot spin, and builds a fresh stream from the current
+default device before the next `listen.start`. A failed first `play` rebuilds once. An audio
+failure while listening stays fatal. `AudioSession` in `awaz-cli` owns this policy. The
+`Microphone` trait isolates it from a real device, so the unit tests run without one. Tests
+cover the fatal policy, the stale-stream rebuild, the failed-start rebuild, the healthy
+no-rebuild path, and the no-spin channels.
+
 CLI reliability hardening is complete. The shared `tests/fixtures/jfk.wav` file provides a documented local smoke test for Moonshine, Apple Speech, and NeMo Speech. Model downloads now repair partial caches, serialize concurrent writers, and validate file sizes before installation. File transcription streams input to providers; offline-only Parakeet buffers one utterance because its SDK call requires contiguous audio. `serve` uses a bounded recognizer worker, keeps protocol control responsive, isolates audio across utterances, suppresses cancelled results, and reports runtime audio failures. Unsupported provider customization is explicit. Apple helper operations have timeouts. Interactive microphone output does not write ANSI sequences to redirected streams. The reusable provider conformance suite checks inactive operations, silence, cancellation, immediate restart, repeated utterances, stale events, final-event count, and customization capabilities. Moonshine, Apple Speech, Nemotron, and Parakeet pass on Apple Silicon. The suite found and fixed an Apple Speech timeout when an utterance contained no audio.
 
 Moonshine, Apple Speech, and NeMo Speech are working STT providers. Select them with `--provider moonshine|apple|nemo` or `AWAZ_PROVIDER`. Moonshine remains the portable default. NeMo uses the native SDK C ABI and supports Nemotron 3.5 streaming plus Parakeet TDT v3 full-utterance recognition. Awaz downloads pinned NeMo GGUF files with size and SHA-256 verification. On an M2 Pro, all providers transcribed the 11-second JFK fixture correctly. Warm release runs, including process and model load, took 0.35 seconds for Apple Speech, 0.56 seconds for Moonshine, 0.56 seconds for Parakeet, and 1.59 seconds for streaming Nemotron. Peak RSS was 19 MiB, 625 MiB, 804 MiB, and 1,009 MiB respectively. These are smoke measurements, not a default-provider decision. macOS downloads Apple language assets on demand. Apple file transcription and the packaged macOS archive are verified on macOS 26; microphone tests remain. The Pi integration forwards `AWAZ_PROVIDER`. Its `Alt+R` shortcut cancels a recording while Awaz starts or finalizes. The Moonshine live loop now polls on a fixed tick and feeds queued audio before inference, which prevents continuous capture or a slow poll from adding avoidable latency. Release 0.5.2 changes the `serve` input stream lifecycle: the stream now runs only from `listen.start` until stop or cancel. The recognizer stays warm while idle. This prevents a persistent macOS microphone privacy indicator. Release 0.5.1 added provider conformance checks and the Apple Speech empty-utterance fix.
 
 ## Next
 
-1. Verify Apple `mic` and `serve` on physical hardware. Confirm that the macOS microphone privacy indicator appears only while listening and clears after stop and cancel.
+1. Confirm `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, and
+   `cargo test --workspace` are green in CI.
+2. Verify on physical hardware that the first dictation after a long idle pause works, and that
+   the macOS microphone privacy indicator stays off while idle and clears after stop and cancel.
+3. Tag `v0.5.3` and push the tag. Then bump `AWAZ_ENGINE_REF` in the awaz-ui repository to
+   `v0.5.3`.
+4. Verify Apple `mic` and `serve` on physical hardware. Confirm that the macOS microphone privacy indicator appears only while listening and clears after stop and cancel.
 2. Re-verify Lenovo Moonshine dictation and the Pi lazy-start/unload flow.
 3. Run the native provider conformance suite on Linux arm64/x86_64 and Windows x86_64.
 4. Add full stdio protocol tests with fake audio capture and recognizers.
