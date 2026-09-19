@@ -2,8 +2,8 @@
 
 ## Status
 
-Awaz CLI 0.5.3 is tagged and pushed. The release workflow publishes the four platform
-archives. User confirmation and a physical-hardware check are still open.
+Awaz CLI 0.5.3 is released. The tag `v0.5.3` is published with all four platform archives.
+Awaz UI 0.2.1 bundles this version through `AWAZ_ENGINE_REF`.
 
 0.5.3 fixes the first-dictation-after-idle failure in `serve`. A microphone stream that fails
 while idle no longer stops the process. The engine marks the stream for rebuild, stops reading
@@ -20,11 +20,9 @@ Moonshine, Apple Speech, and NeMo Speech are working STT providers. Select them 
 
 ## Next
 
-1. Confirm the `v0.5.3` release workflow publishes every platform archive.
-2. Confirm the release on physical hardware: the first dictation after a long idle pause must
-   work, and the macOS microphone privacy indicator must stay off while idle and clear after
-   stop and cancel.
-3. After that confirmation, bump `AWAZ_ENGINE_REF` in the awaz-ui repository to `v0.5.3`.
+1. Confirm on physical hardware that the first dictation after a long idle pause works, and that
+   the macOS microphone privacy indicator stays off while idle and clears after stop and cancel.
+   The Awaz UI 0.2.1 release is the integration check.
 2. Re-verify Lenovo Moonshine dictation and the Pi lazy-start/unload flow.
 3. Run the native provider conformance suite on Linux arm64/x86_64 and Windows x86_64.
 4. Add full stdio protocol tests with fake audio capture and recognizers.
